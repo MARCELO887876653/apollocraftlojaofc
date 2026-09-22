@@ -42,7 +42,7 @@ function resolveToken(config: GatewayConfig): string | null {
 export const createPixPayment = action({
   args: { orderId: v.id("orders") },
   handler: async (ctx: any, { orderId }: { orderId: any }) => {
-    const order: any = await ctx.runQuery(dataApi().internalGetOrder, { orderId });
+    const order: any = await ctx.runQuery(dataApi().internalGetOrder, { id: orderId });
     if (!order) throw new Error("Pedido não encontrado");
     if (order.paymentStatus === "paid") {
       return { alreadyPaid: true as const };
@@ -107,7 +107,7 @@ export const createPixPayment = action({
 export const refreshPaymentStatus = action({
   args: { orderId: v.id("orders") },
   handler: async (ctx: any, { orderId }: { orderId: any }) => {
-    const order: any = await ctx.runQuery(dataApi().internalGetOrder, { orderId });
+    const order: any = await ctx.runQuery(dataApi().internalGetOrder, { id: orderId });
     if (!order?.gatewayPaymentId || order.paymentStatus !== "pending") {
       return { status: order?.paymentStatus ?? "unknown" };
     }

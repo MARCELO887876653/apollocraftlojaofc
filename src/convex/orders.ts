@@ -1,5 +1,6 @@
 import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { requireAdmin, logAudit } from "./lib/admin";
 import {
   checkRateLimit, generateOrderNumber, generateToken, getSetting,
@@ -283,6 +284,92 @@ export const listMine = query({
       .withIndex("by_email", (q) => q.eq("customerEmail", email))
       .collect();
     return orders.sort((a, b) => b.createdAt - a.createdAt);
+  },
+});
+
+// ─── Área do cliente (Minha conta) ───
+
+/** Histórico de pedidos do usuário logado (vinculado ao e-mail da conta). */
+export const myOrders = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const user = await ctx.db.get(userId);
+    if (!user?.email) return null;
+    const orders = await ctx.db
+      .query("orders")
+      .withIndex("by_email", (q) => q.eq("customerEmail", user.email!))
+      .collect();
+    return orders.sort((a, b) => b.createdAt - a.createdAt);
+  },
+});
+
+/** Entregas (o que o cliente recebeu) de um pedido dele. Só expõe itens
+ *  marcados como "mostrar ao cliente" e apenas quando entregues. */
+export const myOrderDeliveries = query({
+  args: { number: v.string() },
+  handler: async (ctx, { number }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const user = await ctx.db.get(userId);
+    if (!user?.email) return null;
+    const order = await ctx.db
+      .query("orders")
+      .withIndex("by_number", (q) => q.eq("number", number))
+      .first();
+    if (!order || order.customerEmail !== user.email) return null;
+    const deliveries = await ctx.db
+      .query("deliveries")
+      .withIndex("by_order", (q) => q.eq("orderId", order._id))
+      .collect();
+    const visible = [];
+    for (const d of deliveries) {
+      const product = await ctx.db.get(d.productId);
+      if (!(product?.delivery?.showToCustomer ?? true)) continue;
+      visible.push({
+        productName: d.productName,
+        quantity: d.quantity,
+        type: d.type,
+        status: d.status,
+        deliveredAt: d.deliveredAt,
+        payload: d.status === "delivered" ? d.payload : undefined,
+      });
+    }
+    return visible;
+  },
+});
+
+/** Entregas visíveis na página pública do pedido (sem login).
+ *  O número do pedido funciona como token de acesso; só expõe itens com
+ *  "mostrar ao cliente" ativado e o payload apenas quando entregue. */
+export const guestDeliveries = query({
+  args: { number: v.string() },
+  handler: async (ctx, { number }) => {
+    const order = await ctx.db
+      .query("orders")
+      .withIndex("by_number", (q) => q.eq("number", number))
+      .first();
+    if (!order) return null;
+    if (order.paymentStatus !== "paid") return [];
+    const deliveries = await ctx.db
+      .query("deliveries")
+      .withIndex("by_order", (q) => q.eq("orderId", order._id))
+      .collect();
+    const visible = [];
+    for (const d of deliveries) {
+      const product = await ctx.db.get(d.productId);
+      if (!(product?.delivery?.showToCustomer ?? true)) continue;
+      visible.push({
+        productName: d.productName,
+        quantity: d.quantity,
+        type: d.type,
+        status: d.status,
+        deliveredAt: d.deliveredAt,
+        payload: d.status === "delivered" ? d.payload : undefined,
+      });
+    }
+    return visible;
   },
 });
 

@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { useCart } from "@/lib/cart";
-import { ShoppingBag, ShoppingCart, Menu, X, Zap, MessageCircle } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { ShoppingBag, ShoppingCart, Menu, X, Zap, MessageCircle, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ type MenuItem = { label: string; url: string; newTab?: boolean };
 export function StoreLayout({ children }: { children: React.ReactNode }) {
   const store = useQuery(api.settings.getStore) as Store | undefined;
   const menu = useQuery(api.settings.getMenu) as MenuItem[] | undefined;
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const cart = useCart();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -82,6 +84,17 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
             <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
               <Link to="/painel">Painel</Link>
             </Button>
+            {authLoading ? null : isAuthenticated ? (
+              <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
+                <Link to="/conta">
+                  <User className="mr-1.5 size-4" /> Minha conta
+                </Link>
+              </Button>
+            ) : (
+              <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
+                <Link to="/auth?returnTo=%2Fconta">Entrar</Link>
+              </Button>
+            )}
             <Button
               variant="outline"
               size="icon"
@@ -145,6 +158,7 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
             <Link to="/loja" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Nossa Loja</Link>
             <Link to="/p/termos" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Termos de Serviço</Link>
             <Link to="/blog" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Blog</Link>
+            <Link to="/conta" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Minha Conta</Link>
             <Link to="/painel" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Painel Admin</Link>
           </div>
           <div className="flex items-center gap-4 pt-1">

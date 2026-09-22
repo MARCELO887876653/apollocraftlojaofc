@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ImageUpload } from "@/components/admin/ImageUpload";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 
@@ -94,14 +95,16 @@ export default function AdminSettings() {
             <Label>Descrição</Label>
             <Input value={form.description} onChange={(e) => set("description", e.target.value)} />
           </div>
-          <div>
-            <Label>URL do logo</Label>
-            <Input value={form.logoUrl} onChange={(e) => set("logoUrl", e.target.value)} placeholder="https://..." />
-          </div>
-          <div>
-            <Label>URL do favicon</Label>
-            <Input value={form.faviconUrl} onChange={(e) => set("faviconUrl", e.target.value)} placeholder="https://..." />
-          </div>
+          <ImageUpload
+            label="Logo da loja"
+            value={form.logoUrl || undefined}
+            onChange={(v) => set("logoUrl", v ?? "")}
+          />
+          <ImageUpload
+            label="Favicon"
+            value={form.faviconUrl || undefined}
+            onChange={(v) => set("faviconUrl", v ?? "")}
+          />
           <div>
             <Label>E-mail de contato</Label>
             <Input value={form.email} onChange={(e) => set("email", e.target.value)} />
@@ -174,10 +177,11 @@ export default function AdminSettings() {
             <Label>Título (title tag)</Label>
             <Input value={form.seo.title} onChange={(e) => set("seo", { ...form.seo, title: e.target.value })} />
           </div>
-          <div>
-            <Label>Imagem Open Graph (URL)</Label>
-            <Input value={form.seo.ogImage ?? ""} onChange={(e) => set("seo", { ...form.seo, ogImage: e.target.value })} />
-          </div>
+          <ImageUpload
+            label="Imagem Open Graph (compartilhamento)"
+            value={form.seo.ogImage || undefined}
+            onChange={(v) => set("seo", { ...form.seo, ogImage: v ?? "" })}
+          />
           <div className="sm:col-span-2">
             <Label>Meta description</Label>
             <Input value={form.seo.description} onChange={(e) => set("seo", { ...form.seo, description: e.target.value })} />

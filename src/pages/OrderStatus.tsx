@@ -4,6 +4,7 @@ import { useAction, useQuery } from "convex/react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { StoreLayout } from "@/components/store/StoreLayout";
+import { DeliveriesList } from "@/components/store/DeliveriesList";
 import { formatBRL, formatDate, PAYMENT_STATUS_LABEL, DELIVERY_STATUS_LABEL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -200,6 +201,18 @@ export default function OrderStatusPage() {
             <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="size-3 animate-spin" /> Aguardando confirmação do pagamento…
             </p>
+          </motion.div>
+        )}
+
+        {/* O que você recebeu (entregas automáticas) */}
+        {order.paymentStatus === "paid" && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            className="mt-8"
+          >
+            <DeliveriesList number={order.number} variant="guest" />
           </motion.div>
         )}
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { formatBRL, DELIVERY_TYPE_LABEL } from "@/lib/format";
@@ -12,8 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ImageUpload } from "@/components/admin/ImageUpload";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Loader2, Search, Package } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Search, Package, ImagePlus, X } from "lucide-react";
 
 type Product = {
   _id: string; name: string; slug: string; image?: string;
@@ -265,17 +266,12 @@ export default function AdminProducts() {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <Label>Imagem principal (URL)</Label>
-                <Input value={form.image} onChange={(e) => set("image", e.target.value)} placeholder="https://..." />
-              </div>
-              <div>
-                <Label>Galeria (URLs separadas por vírgula)</Label>
-                <Input
-                  value={form.images.join(", ")}
-                  onChange={(e) => set("images", e.target.value.split(",").map((s: string) => s.trim()))}
-                />
-              </div>
+              <ImageUpload
+                label="Imagem principal"
+                value={form.image || undefined}
+                onChange={(v) => set("image", v ?? "")}
+              />
+              <GalleryField images={form.images} onChange={(imgs) => set("images", imgs)} />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3">
@@ -454,6 +450,102 @@ export default function AdminProducts() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function GalleryField({
+  images, onChange,
+}: {
+  images: string[];
+  onChange: (imgs: string[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const generateUploadUrl = useMutation(api.files.generateUploadUrl);
+  const finalizeUpload = useMutation(api.files.finalizeUpload);
+
+  const upload = async (files: FileList) => {
+    setUploading(true);
+    try {
+      const uploaded: string[] = [];
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith("image/")) continue;
+        if (file.size > 5 * 1024 * 1024) {
+          toast.error(`"${file.name}" passa de 5 MB e foi ignorada`);
+          continue;
+        }
+        const postUrl = await generateUploadUrl();
+        const res = await fetch(postUrl, {
+          method: "POST",
+          headers: { "Content-Type": file.type },
+          body: file,
+        });
+        if (!res.ok) throw new Error("Falha no envio da imagem");
+        const { storageId } = (await res.json()) as { storageId: string };
+        const { url } = await finalizeUpload({ storageId: storageId as any });
+        uploaded.push(url);
+      }
+      if (uploaded.length) {
+        onChange([...images.filter(Boolean), ...uploaded]);
+        toast.success(`${uploaded.length} foto(s) adicionada(s)`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao enviar");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label>Galeria de fotos</Label>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) void upload(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <div className="flex flex-wrap gap-2">
+        {images.filter(Boolean).map((url, i) => (
+          <div key={i} className="group relative size-16 overflow-hidden rounded-md border bg-muted">
+            <img src={url} alt="" className="h-full w-full object-cover" />
+            <button
+              type="button"
+              aria-label="Remover foto"
+              className="absolute right-0.5 top-0.5 rounded-full bg-background/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100"
+              onClick={() => onChange(images.filter((_, idx) => idx !== i))}
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+          className="flex size-16 items-center justify-center rounded-md border border-dashed text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
+          aria-label="Adicionar fotos"
+        >
+          {uploading ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus className="size-4" />}
+        </button>
+      </div>
+      <button
+        type="button"
+        className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+        onClick={() => {
+          const url = prompt("URL da imagem:");
+          if (url) onChange([...images.filter(Boolean), url.trim()]);
+        }}
+      >
+        + URL manual
+      </button>
     </div>
   );
 }

@@ -19,6 +19,7 @@ const ProductPage = lazy(() => import("./pages/Product.tsx"));
 const CartPage = lazy(() => import("./pages/Cart.tsx"));
 const CheckoutPage = lazy(() => import("./pages/Checkout.tsx"));
 const OrderStatusPage = lazy(() => import("./pages/OrderStatus.tsx"));
+const AccountPage = lazy(() => import("./pages/Account.tsx"));
 const StaticPage = lazy(() => import("./pages/StaticPage.tsx"));
 
 const AdminLayout = lazy(() => import("./pages/admin/AdminLayout.tsx"));
@@ -151,6 +152,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/carrinho" element={<CartPage />} />
                   <Route path="/checkout" element={<CheckoutPage />} />
                   <Route path="/pedido/:number" element={<OrderStatusPage />} />
+                  <Route path="/conta" element={<AccountPage />} />
                   <Route path="/blog" element={<StaticPage />} />
                   <Route path="/blog/:slug" element={<StaticPage />} />
                   <Route path="/p/:slug" element={<StaticPage />} />

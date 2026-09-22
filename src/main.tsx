@@ -8,11 +8,34 @@ import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
+import { CartProvider } from "@/lib/cart";
+import { ThemeProvider } from "@/lib/theme";
 
 // Lazy load route components for better code splitting
-const Landing = lazy(() => import("./pages/Landing.tsx"));
+const Home = lazy(() => import("./pages/Home.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
-const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
+const Catalog = lazy(() => import("./pages/Catalog.tsx"));
+const ProductPage = lazy(() => import("./pages/Product.tsx"));
+const CartPage = lazy(() => import("./pages/Cart.tsx"));
+const CheckoutPage = lazy(() => import("./pages/Checkout.tsx"));
+const OrderStatusPage = lazy(() => import("./pages/OrderStatus.tsx"));
+const StaticPage = lazy(() => import("./pages/StaticPage.tsx"));
+
+const AdminLayout = lazy(() => import("./pages/admin/AdminLayout.tsx"));
+const AdminDashboard = lazy(() => import("./pages/admin/Dashboard.tsx"));
+const AdminOrders = lazy(() => import("./pages/admin/Orders.tsx"));
+const AdminProducts = lazy(() => import("./pages/admin/Products.tsx"));
+const AdminCategories = lazy(() => import("./pages/admin/Categories.tsx"));
+const AdminCoupons = lazy(() => import("./pages/admin/Coupons.tsx"));
+const AdminCustomers = lazy(() => import("./pages/admin/Customers.tsx"));
+const AdminDeliveries = lazy(() => import("./pages/admin/Deliveries.tsx"));
+const AdminContent = lazy(() => import("./pages/admin/Content.tsx"));
+const AdminAppearance = lazy(() => import("./pages/admin/Appearance.tsx"));
+const AdminIntegrations = lazy(() => import("./pages/admin/Integrations.tsx"));
+const AdminTeam = lazy(() => import("./pages/admin/Team.tsx"));
+const AdminLogs = lazy(() => import("./pages/admin/Logs.tsx"));
+const AdminSettings = lazy(() => import("./pages/admin/Settings.tsx"));
+
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -115,28 +138,60 @@ createRoot(document.getElementById("root")!).render(
         <VlyToolbar />
       </ToolbarErrorBoundary>
       <ConvexAuthProvider client={convex}>
-        <BrowserRouter>
-          <RouteSyncer />
-          <Suspense fallback={<RouteLoading />}>
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route
-                path="/auth"
-                element={<AuthPage redirectAfterAuth="/dashboard" />}
-              />
-              <Route
-                path="/dashboard"
-                element={
-                  <RequireAuth>
-                    <Dashboard />
-                  </RequireAuth>
-                }
-              />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
-        <Toaster />
+        <ThemeProvider>
+          <CartProvider>
+            <BrowserRouter>
+              <RouteSyncer />
+              <Suspense fallback={<RouteLoading />}>
+                <Routes>
+                  {/* Loja pública */}
+                  <Route path="/" element={<Home />} />
+                  <Route path="/loja" element={<Catalog />} />
+                  <Route path="/produto/:slug" element={<ProductPage />} />
+                  <Route path="/carrinho" element={<CartPage />} />
+                  <Route path="/checkout" element={<CheckoutPage />} />
+                  <Route path="/pedido/:number" element={<OrderStatusPage />} />
+                  <Route path="/blog" element={<StaticPage />} />
+                  <Route path="/blog/:slug" element={<StaticPage />} />
+                  <Route path="/p/:slug" element={<StaticPage />} />
+
+                  {/* Auth */}
+                  <Route
+                    path="/auth"
+                    element={<AuthPage redirectAfterAuth="/painel" />}
+                  />
+
+                  {/* Painel admin */}
+                  <Route
+                    path="/painel"
+                    element={
+                      <RequireAuth>
+                        <AdminLayout />
+                      </RequireAuth>
+                    }
+                  >
+                    <Route index element={<AdminDashboard />} />
+                    <Route path="pedidos" element={<AdminOrders />} />
+                    <Route path="produtos" element={<AdminProducts />} />
+                    <Route path="categorias" element={<AdminCategories />} />
+                    <Route path="cupons" element={<AdminCoupons />} />
+                    <Route path="clientes" element={<AdminCustomers />} />
+                    <Route path="entregas" element={<AdminDeliveries />} />
+                    <Route path="conteudo" element={<AdminContent />} />
+                    <Route path="aparencia" element={<AdminAppearance />} />
+                    <Route path="integracoes" element={<AdminIntegrations />} />
+                    <Route path="equipe" element={<AdminTeam />} />
+                    <Route path="logs" element={<AdminLogs />} />
+                    <Route path="configuracoes" element={<AdminSettings />} />
+                  </Route>
+
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </Suspense>
+            </BrowserRouter>
+            <Toaster />
+          </CartProvider>
+        </ThemeProvider>
       </ConvexAuthProvider>
     </RootErrorBoundary>
   </StrictMode>,

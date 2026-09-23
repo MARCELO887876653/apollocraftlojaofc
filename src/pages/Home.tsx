@@ -104,7 +104,7 @@ function Hero() {
           {hero?.title ?? (
             <>
               Domine o jogo com os{" "}
-              <span className="bg-gradient-to-r from-primary via-indigo-400 to-sky-400 bg-clip-text text-transparent">
+              <span className="neon-text bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">
                 kits e VIPs
               </span>{" "}
               da nossa loja!
@@ -118,7 +118,7 @@ function Hero() {
           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}>
             <Link
               to="/loja"
-              className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-full bg-white px-7 text-sm font-bold text-zinc-950 shadow-lg shadow-white/10 transition-colors hover:bg-zinc-200"
+              className="neon-glow-strong inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-full bg-white px-7 text-sm font-bold text-zinc-950 shadow-lg shadow-emerald-500/25 transition-colors hover:bg-zinc-200"
             >
               <ShoppingBag className="size-4" /> Conferir ofertas
             </Link>
@@ -189,16 +189,16 @@ function Categories() {
           initial={{ opacity: 0, y: 12 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="mb-5 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-1.5 text-sm font-semibold text-muted-foreground"
+          className="neon-border mb-5 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-1.5 text-sm font-semibold text-muted-foreground"
         >
-          <List className="size-4" /> Categorias populares
+          <List className="size-4 text-emerald-500" /> Categorias populares
         </motion.span>
         <motion.div variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: "-60px" }} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {categories.slice(0, 6).map((c) => (
             <motion.div key={c._id} variants={fadeUp} whileHover={{ y: -4 }}>
               <Link
                 to={`/loja?categoria=${c.slug}`}
-                className="group flex items-center gap-4 rounded-2xl border bg-card p-3 transition-colors hover:border-foreground/25"
+                className="group flex items-center gap-4 rounded-2xl border bg-card p-3 transition-all duration-300 hover:border-emerald-500/40 hover:shadow-[0_0_28px_-8px_rgb(16_185_129/0.4)]"
               >
                 <div
                   className="relative size-20 shrink-0 overflow-hidden rounded-xl transition-transform duration-300 group-hover:scale-105 sm:size-24"
@@ -220,7 +220,7 @@ function Categories() {
                   <p className="mt-0.5 line-clamp-2 hidden text-sm text-muted-foreground sm:block">
                     {c.description ?? `Veja os itens disponíveis de ${c.name}.`}
                   </p>
-                  <span className="mt-2.5 inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 text-sm font-bold text-zinc-950 transition-colors group-hover:bg-zinc-200">
+                  <span className="neon-glow mt-2.5 inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 text-sm font-bold text-zinc-950 transition-colors group-hover:bg-zinc-200">
                     Ver produtos <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
                   </span>
                 </div>

@@ -149,7 +149,7 @@ export default function ProductPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: "easeOut" }}
           >
-            <div className="overflow-hidden rounded-2xl border bg-muted">
+            <div className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-muted neon-glow">
               {mainImage || product.image ? (
                 <motion.img
                   key={mainImage ?? product.image}
@@ -207,7 +207,7 @@ export default function ProductPage() {
             )}
 
             <div className="mt-5 flex flex-wrap items-end gap-3">
-              <span className="text-4xl font-extrabold text-white">{formatBRL(price)}</span>
+              <span className="text-4xl font-extrabold text-white neon-text">{formatBRL(price)}</span>
               {discount > 0 && (
                 <span className="pb-1 text-lg text-muted-foreground line-through">{formatBRL(compareAt!)}</span>
               )}
@@ -283,7 +283,7 @@ export default function ProductPage() {
                     addToCart();
                     navigate("/checkout");
                   }}
-                  className="h-12 w-full rounded-xl bg-white text-sm font-bold text-zinc-950 shadow-lg shadow-white/5 hover:bg-zinc-200"
+                  className="neon-glow-strong h-12 w-full rounded-full bg-white text-sm font-bold text-zinc-950 shadow-lg shadow-emerald-500/20 hover:bg-zinc-200"
                 >
                   <ShoppingCart className="mr-2 size-4" /> Comprar agora
                 </Button>

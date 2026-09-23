@@ -9,12 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ImageUpload } from "@/components/admin/ImageUpload";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Loader2, ChevronUp, ChevronDown } from "lucide-react";
 
 type Category = {
   _id: string; name: string; slug: string; description?: string; icon?: string;
-  color?: string; parentId?: string; order: number; active: boolean;
+  image?: string; color?: string; parentId?: string; order: number; active: boolean;
 };
 
 export default function AdminCategories() {
@@ -30,13 +31,13 @@ export default function AdminCategories() {
   const roots = (categories ?? []).filter((c) => !c.parentId);
   const subsOf = (id: string) => (categories ?? []).filter((c) => c.parentId === id);
 
-  const openNew = () => setEditing({ id: null, data: { name: "", description: "", icon: "", color: "", parentId: "", active: true } });
+  const openNew = () => setEditing({ id: null, data: { name: "", description: "", icon: "", image: "", color: "", parentId: "", active: true } });
   const openEdit = (c: Category) =>
     setEditing({
       id: c._id,
       data: {
         name: c.name, description: c.description ?? "", icon: c.icon ?? "",
-        color: c.color ?? "", parentId: c.parentId ?? "", active: c.active,
+        image: c.image ?? "", color: c.color ?? "", parentId: c.parentId ?? "", active: c.active,
       },
     });
 
@@ -48,6 +49,7 @@ export default function AdminCategories() {
       name: editing.data.name,
       description: editing.data.description || undefined,
       icon: editing.data.icon || undefined,
+      image: editing.data.image || undefined,
       color: editing.data.color || undefined,
       parentId: editing.data.parentId ? (editing.data.parentId as any) : undefined,
       order: editing.id ? (categories?.find((c) => c._id === editing.id)?.order ?? 0) : (categories?.length ?? 0),
@@ -142,6 +144,11 @@ export default function AdminCategories() {
                 <Label>Descrição</Label>
                 <Input value={editing.data.description} onChange={(e) => set("description", e.target.value)} />
               </div>
+              <ImageUpload
+                label="Imagem da categoria"
+                value={editing.data.image || undefined}
+                onChange={(v) => set("image", v ?? "")}
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Ícone (emoji)</Label>
@@ -196,7 +203,9 @@ function Row({
 }) {
   return (
     <div className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2.5">
-      {category.icon && <span className="text-lg">{category.icon}</span>}
+      {category.image ? (
+        <img src={category.image} alt="" className="size-9 rounded-lg object-cover" />
+      ) : category.icon && <span className="text-lg">{category.icon}</span>}
       {category.color && <span className="size-3 rounded-full" style={{ backgroundColor: category.color }} />}
       <div className="flex-1">
         <p className="text-sm font-medium">{category.name}</p>

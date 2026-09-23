@@ -13,8 +13,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ImageUpload } from "@/components/admin/ImageUpload";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Loader2, Search, Package, ImagePlus, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Search, Package, ImagePlus, X, MoreVertical, GripVertical, ChevronDown } from "lucide-react";
 
 type Product = {
   _id: string; name: string; slug: string; image?: string;
@@ -157,77 +158,115 @@ export default function AdminProducts() {
     }
   };
 
+  // Agrupa produtos por categoria (estilo CentralCart)
+  const groups: Array<{ key: string; name: string; items: Product[] }> = [];
+  if (products !== undefined) {
+    const byId = new Map<string, Product[]>();
+    for (const p of filtered) {
+      const key = p.categoryId ?? "none";
+      if (!byId.has(key)) byId.set(key, []);
+      byId.get(key)!.push(p);
+    }
+    for (const c of categories ?? []) {
+      const items = byId.get(c._id);
+      if (items?.length) {
+        groups.push({ key: c._id, name: c.name, items });
+        byId.delete(c._id);
+      }
+    }
+    for (const [key, items] of byId) {
+      groups.push({ key, name: "Sem categoria", items });
+    }
+  }
+
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Produtos</h1>
-          <p className="text-sm text-muted-foreground">Catálogo, preços, estoque e entrega automática</p>
+      <div>
+        <h1 className="text-2xl font-extrabold tracking-tight">Pacotes</h1>
+        <p className="text-sm text-muted-foreground">Crie ou altere os produtos que deseja vender na sua loja.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button onClick={openNew} variant="white" className="rounded-full font-bold">
+          <Plus className="size-4" /> Novo pacote
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-52 flex-1 sm:max-w-xs">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input placeholder="Buscar pacote" value={search} onChange={(e) => setSearch(e.target.value)} className="rounded-xl pl-9" />
         </div>
-        <Button onClick={openNew}><Plus className="mr-2 size-4" /> Novo produto</Button>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder="Buscar..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
-      </div>
+      {products === undefined && (
+        <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+      )}
 
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                  <th className="px-4 py-3">Produto</th>
-                  <th className="px-4 py-3">Preço</th>
-                  <th className="px-4 py-3">Estoque</th>
-                  <th className="px-4 py-3">Vendas</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products === undefined && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center"><Loader2 className="mx-auto size-5 animate-spin" /></td></tr>
-                )}
-                {filtered.length === 0 && products !== undefined && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Nenhum produto</td></tr>
-                )}
-                {filtered.map((p) => (
-                  <tr key={p._id} className="border-b hover:bg-muted/50">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="size-10 shrink-0 overflow-hidden rounded-md bg-muted">
-                          {p.image && <img src={p.image} alt="" className="h-full w-full object-cover" />}
-                        </div>
-                        <div>
-                          <p className="font-medium">{p.name}</p>
-                          <p className="text-xs text-muted-foreground">/{p.slug}</p>
-                        </div>
+      {products !== undefined && filtered.length === 0 && (
+        <div className="rounded-2xl border bg-card py-12 text-center text-sm text-muted-foreground">
+          Nenhum produto encontrado.
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {groups.map((g) => {
+          const isCollapsed = collapsed[g.key];
+          return (
+            <div key={g.key} className="overflow-hidden rounded-2xl border bg-card">
+              <button
+                className="flex w-full items-center gap-3 border-b bg-muted/40 px-4 py-3.5 text-left"
+                onClick={() => setCollapsed((s) => ({ ...s, [g.key]: !s[g.key] }))}
+              >
+                <GripVertical className="size-4.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-lg font-extrabold uppercase tracking-tight">{g.name}</span>
+                <span className="rounded-md bg-sky-500/20 px-2 py-0.5 text-xs font-bold text-sky-500">Categoria</span>
+                <ChevronDown className={"size-4.5 text-muted-foreground transition-transform " + (isCollapsed ? "" : "rotate-180")} />
+              </button>
+              {!isCollapsed && (
+                <div>
+                  {g.items.map((p, i) => (
+                    <div
+                      key={p._id}
+                      className={"flex items-center gap-3 px-4 py-3 " + (i > 0 ? "border-t" : "")}
+                    >
+                      <GripVertical className="size-4 shrink-0 text-muted-foreground/60" />
+                      <div className="size-9 shrink-0 overflow-hidden rounded-lg bg-muted">
+                        {p.image && <img src={p.image} alt="" className="h-full w-full object-cover" />}
                       </div>
-                    </td>
-                    <td className="px-4 py-3">{formatBRL(p.priceCents)}</td>
-                    <td className="px-4 py-3">{p.unlimitedStock ? "∞" : p.stock}</td>
-                    <td className="px-4 py-3">{p.salesCount}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {p.active ? <Badge className="bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/15">Ativo</Badge> : <Badge variant="outline">Inativo</Badge>}
-                        {p.featured && <Badge variant="secondary">Destaque</Badge>}
-                        {p.popular && <Badge variant="secondary">Popular</Badge>}
-                        {p.hidden && <Badge variant="outline">Oculto</Badge>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(p._id)}><Pencil className="size-4" /></Button>
-                      <Button variant="ghost" size="icon" className="text-red-600" onClick={() => del(p._id)}><Trash2 className="size-4" /></Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                      <button
+                        className="min-w-0 flex-1 truncate text-left text-[15px] font-semibold hover:underline"
+                        onClick={() => openEdit(p._id)}
+                      >
+                        {p.name} - <span className="font-extrabold">{formatBRL(p.priceCents)}</span>
+                        {!p.active && <Badge variant="outline" className="ml-2">Inativo</Badge>}
+                        {p.featured && <Badge variant="secondary" className="ml-2">Destaque</Badge>}
+                        {p.hidden && <Badge variant="outline" className="ml-2">Oculto</Badge>}
+                      </button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="icon" aria-label="Opções" className="rounded-lg">
+                            <MoreVertical className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEdit(p._id)}>
+                            <Pencil className="size-4" /> Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => del(p._id)} className="text-red-500">
+                            <Trash2 className="size-4" /> Excluir
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">

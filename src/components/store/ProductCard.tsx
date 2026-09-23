@@ -113,7 +113,7 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
                 maxQty: product.maxQty,
               })
             }
-            className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-white text-sm font-bold text-zinc-950 transition-colors hover:bg-zinc-200 disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-full bg-white text-sm font-bold text-zinc-950 transition-colors hover:bg-zinc-200 disabled:opacity-50"
           >
             <ShoppingCart className="size-4" /> Comprar agora
           </motion.button>

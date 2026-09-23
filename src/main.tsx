@@ -24,6 +24,8 @@ const StaticPage = lazy(() => import("./pages/StaticPage.tsx"));
 
 const AdminLayout = lazy(() => import("./pages/admin/AdminLayout.tsx"));
 const AdminDashboard = lazy(() => import("./pages/admin/Dashboard.tsx"));
+const AdminStats = lazy(() => import("./pages/admin/Stats.tsx"));
+const AdminMore = lazy(() => import("./pages/admin/More.tsx"));
 const AdminOrders = lazy(() => import("./pages/admin/Orders.tsx"));
 const AdminProducts = lazy(() => import("./pages/admin/Products.tsx"));
 const AdminCategories = lazy(() => import("./pages/admin/Categories.tsx"));
@@ -36,6 +38,7 @@ const AdminIntegrations = lazy(() => import("./pages/admin/Integrations.tsx"));
 const AdminTeam = lazy(() => import("./pages/admin/Team.tsx"));
 const AdminLogs = lazy(() => import("./pages/admin/Logs.tsx"));
 const AdminSettings = lazy(() => import("./pages/admin/Settings.tsx"));
+const AdminPromotions = lazy(() => import("./pages/admin/Promotions.tsx"));
 
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
@@ -173,10 +176,13 @@ createRoot(document.getElementById("root")!).render(
                     }
                   >
                     <Route index element={<AdminDashboard />} />
+                    <Route path="stats" element={<AdminStats />} />
+                    <Route path="mais" element={<AdminMore />} />
                     <Route path="pedidos" element={<AdminOrders />} />
                     <Route path="produtos" element={<AdminProducts />} />
                     <Route path="categorias" element={<AdminCategories />} />
                     <Route path="cupons" element={<AdminCoupons />} />
+                    <Route path="promocoes" element={<AdminPromotions />} />
                     <Route path="clientes" element={<AdminCustomers />} />
                     <Route path="entregas" element={<AdminDeliveries />} />
                     <Route path="conteudo" element={<AdminContent />} />

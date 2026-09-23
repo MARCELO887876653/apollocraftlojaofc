@@ -118,7 +118,7 @@ function Hero() {
           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}>
             <Link
               to="/loja"
-              className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-xl bg-white px-7 text-sm font-bold text-zinc-950 shadow-lg shadow-white/10 transition-colors hover:bg-zinc-200"
+              className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-full bg-white px-7 text-sm font-bold text-zinc-950 shadow-lg shadow-white/10 transition-colors hover:bg-zinc-200"
             >
               <ShoppingBag className="size-4" /> Conferir ofertas
             </Link>
@@ -220,7 +220,7 @@ function Categories() {
                   <p className="mt-0.5 line-clamp-2 hidden text-sm text-muted-foreground sm:block">
                     {c.description ?? `Veja os itens disponíveis de ${c.name}.`}
                   </p>
-                  <span className="mt-2.5 inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-xl bg-white px-4 text-sm font-bold text-zinc-950 transition-colors group-hover:bg-zinc-200">
+                  <span className="mt-2.5 inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 text-sm font-bold text-zinc-950 transition-colors group-hover:bg-zinc-200">
                     Ver produtos <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
                   </span>
                 </div>

@@ -12,6 +12,23 @@ export function formatDate(ts: number): string {
   });
 }
 
+export function formatRelative(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60_000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} ${min === 1 ? "minuto" : "minutos"}`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h} ${h === 1 ? "hora" : "horas"}`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return "há um dia";
+  if (d < 30) return `há ${d} dias`;
+  const mo = Math.floor(d / 30);
+  if (mo === 1) return "há um mês";
+  if (mo < 12) return `há ${mo} meses`;
+  const y = Math.floor(mo / 12);
+  return y === 1 ? "há um ano" : `há ${y} anos`;
+}
+
 export function formatDateOnly(ts: number): string {
   return new Date(ts).toLocaleDateString("pt-BR", {
     day: "2-digit",

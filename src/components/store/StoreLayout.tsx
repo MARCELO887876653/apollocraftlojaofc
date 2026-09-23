@@ -4,7 +4,7 @@ import { Link, useLocation } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/hooks/use-auth";
-import { ShoppingBag, ShoppingCart, Menu, X, Zap, MessageCircle, User } from "lucide-react";
+import { ShoppingBag, ShoppingCart, Menu, X, Zap, MessageCircle, User, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -43,23 +43,26 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <header
         className={cn(
-          "sticky top-0 z-40 border-b transition-all duration-300",
+          "sticky top-0 z-40 transition-all duration-300",
           scrolled
-            ? "border-border/80 bg-background/85 shadow-[0_8px_30px_rgb(0,0,0,0.25)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/70"
-            : "border-transparent bg-background/60 backdrop-blur-md",
+            ? "border-b border-border/80 bg-background/85 shadow-[0_8px_30px_rgb(0,0,0,0.35)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/70"
+            : "border-b border-transparent bg-background/60 backdrop-blur-md",
         )}
       >
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-4 px-4">
           <Link to="/" className="group flex items-center gap-2.5">
             {store?.logoUrl ? (
-              <img src={store.logoUrl} alt={store.name} className="h-9 w-9 rounded-lg object-cover" />
+              <img src={store.logoUrl} alt={store.name} className="h-10 w-10 rounded-lg object-cover" />
             ) : (
-              <span className="relative flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-indigo-500 shadow-lg shadow-primary/25 transition-transform group-hover:scale-105">
-                <ShoppingBag className="size-4.5 text-primary-foreground" />
+              <span className="relative flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-500/25 transition-transform group-hover:scale-105">
+                <ShoppingBag className="size-5 text-emerald-950" />
               </span>
             )}
             <span className="text-lg font-extrabold tracking-tight">
               {store?.name ?? "ApolloCraft"}
+            </span>
+            <span className="hidden size-5 items-center justify-center rounded-full bg-sky-500 sm:flex" title="Loja verificada">
+              <ShieldCheck className="size-3.5 text-white" />
             </span>
           </Link>
 
@@ -81,9 +84,6 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
-              <Link to="/painel">Painel</Link>
-            </Button>
             {authLoading ? null : isAuthenticated ? (
               <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
                 <Link to="/conta">
@@ -96,16 +96,16 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
               </Button>
             )}
             <Button
-              variant="outline"
-              size="icon"
+              variant="white"
+              size="icon-lg"
               asChild
               aria-label="Carrinho"
-              className="relative border-border/80"
+              className="rounded-full text-lg"
             >
               <Link to="/carrinho">
-                <ShoppingCart className="size-4" />
+                <ShoppingCart className="size-5" />
                 {cart.totalCount > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground shadow-md shadow-primary/40">
+                  <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-bold text-emerald-950 shadow-md shadow-emerald-500/40">
                     {cart.totalCount}
                   </span>
                 )}
@@ -144,8 +144,8 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
           {store?.logoUrl ? (
             <img src={store.logoUrl} alt={store.name} className="size-14 rounded-xl object-cover" />
           ) : (
-            <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-indigo-500 shadow-lg shadow-primary/25">
-              <ShoppingBag className="size-6 text-primary-foreground" />
+            <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-500/25">
+              <ShoppingBag className="size-6 text-emerald-950" />
             </span>
           )}
           <p className="text-2xl font-extrabold tracking-tight">{store?.name ?? "ApolloCraft"}</p>

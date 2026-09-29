@@ -52,7 +52,7 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-muted to-card text-muted-foreground">
-            <ShoppingBag className="size-10 opacity-40" />
+            <ShoppingBag className="size-6 opacity-30" />
           </div>
         )}
         {discount > 0 && (

@@ -15,10 +15,23 @@ export const listActive = query({
   handler: async (ctx, { categoryId, search, sort, limit }) => {
     let products;
     if (categoryId) {
-      products = await ctx.db
-        .query("products")
-        .withIndex("by_category", (q) => q.eq("categoryId", categoryId))
-        .collect();
+      // inclui a categoria e todas as suas subcategorias (recursivo)
+      const allCats = await ctx.db.query("categories").collect();
+      const include = new Set<any>([categoryId]);
+      let frontier: any[] = [categoryId];
+      while (frontier.length) {
+        const next: any[] = [];
+        for (const c of allCats) {
+          if (c.parentId && frontier.includes(c.parentId) && !include.has(c._id)) {
+            include.add(c._id);
+            next.push(c._id);
+          }
+        }
+        frontier = next;
+      }
+      products = (await ctx.db.query("products").collect()).filter((p) =>
+        include.has(p.categoryId),
+      );
     } else {
       products = await ctx.db.query("products").collect();
     }

@@ -51,11 +51,22 @@ export const create = mutation({
         continue;
       }
       const value = (customer as any)[f.key];
+      if (f.required && f.key === "email" && !value) continue; // validado abaixo (com fallback da conta)
       if (f.required && (!value || String(value).trim() === ""))
         throw new Error(`${label[f.key] ?? f.label} é obrigatório`);
     }
-    if (!customer.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email))
-      throw new Error("E-mail inválido");
+    if (!customer.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email)) {
+      // fallback: usa o e-mail da conta logada (evita erro quando o visitante
+      // deixa o campo vazio mas está autenticado)
+      const userId = await getAuthUserId(ctx);
+      const user = userId ? await ctx.db.get(userId) : null;
+      const accountEmail = user?.email;
+      if (accountEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountEmail)) {
+        customer.email = accountEmail;
+      } else {
+        throw new Error("E-mail inválido");
+      }
+    }
 
     // recalcula itens a partir do banco
     let subtotal = 0;

@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { useSearchParams } from "react-router";
 import { api } from "@/convex/_generated/api";
@@ -12,13 +12,16 @@ import { Search } from "lucide-react";
 type Category = { _id: string; name: string; slug: string; parentId?: string; order: number; active: boolean; description?: string; icon?: string };
 
 export default function Catalog() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<string>("relevance");
-  const initialCat = searchParams.get("categoria") ?? "";
-  const [catSlug, setCatSlug] = useState(initialCat);
+  const catSlug = searchParams.get("categoria") ?? "";
 
-  useEffect(() => setCatSlug(searchParams.get("categoria") ?? ""), [searchParams]);
+  const setCat = (slug: string) => {
+    if (slug) searchParams.set("categoria", slug);
+    else searchParams.delete("categoria");
+    setSearchParams(searchParams, { replace: true });
+  };
 
   const categories = (useQuery(api.categories.listPublic) as Category[] | undefined) ?? [];
   const category = categories.find((c) => c.slug === catSlug);
@@ -73,18 +76,23 @@ export default function Catalog() {
             <Button
               variant={catSlug === "" ? "default" : "outline"}
               size="sm"
-              onClick={() => setCatSlug("")}
+              onClick={() => setCat("")}
             >
               Todos
             </Button>
-            {subcategories.map((c) => (
+            {subcategories.map((c: any) => (
               <Button
                 key={c._id}
                 variant={catSlug === c.slug ? "default" : "outline"}
                 size="sm"
-                onClick={() => setCatSlug(c.slug)}
+                onClick={() => setCat(c.slug)}
               >
-                {c.icon ? `${c.icon} ` : ""}{c.name}
+                {c.image ? (
+                  <img src={c.image} alt="" className="mr-1.5 inline size-4 rounded-full object-cover" />
+                ) : c.icon ? (
+                  <span className="mr-1.5">{c.icon}</span>
+                ) : null}
+                {c.name}
               </Button>
             ))}
           </div>

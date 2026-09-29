@@ -112,14 +112,14 @@ export async function ensureDefaults(ctx: MutationCtx) {
   const defaults: Array<[string, unknown]> = [
     ["store", DEFAULT_STORE],
     ["theme", DEFAULT_THEME],
-    ["homepage", DEFAULT_HOMEPAGE],
-    [
-      "menu",
-      [
-        { label: "Início", url: "/", newTab: false },
-        { label: "Catálogo", url: "/loja", newTab: false },
-      ],
-    ],      [
+    ["homepage", DEFAULT_HOMEPAGE],      [
+        "menu",
+        [
+          { label: "Início", url: "/", newTab: false },
+          { label: "Catálogo", url: "/loja", newTab: false },
+          { label: "Categorias", url: "/categorias", newTab: false },
+        ],
+      ],      [
         "footer",
         {
           about: "ApolloCraft — sua loja de confiança com entrega automática e pagamento seguro via PIX.",

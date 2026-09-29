@@ -327,6 +327,17 @@ const schema = defineSchema(
     }).index("by_position", ["position"]),
 
     // ─── Integrações ───
+    // Chaves de API para sistemas externos (ex.: servidor Minecraft entregar itens)
+    apiKeys: defineTable({
+      name: v.string(),
+      prefix: v.string(),
+      key: v.string(),
+      active: v.boolean(),
+      lastUsedAt: v.optional(v.number()),
+      createdAt: v.number(),
+      createdBy: v.optional(v.string()),
+    }).index("by_prefix", ["prefix"]),
+
     webhooksOut: defineTable({
       url: v.string(),
       secret: v.string(),

@@ -15,6 +15,7 @@ import { ThemeProvider } from "@/lib/theme";
 const Home = lazy(() => import("./pages/Home.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Catalog = lazy(() => import("./pages/Catalog.tsx"));
+const CategoriesPage = lazy(() => import("./pages/Categories.tsx"));
 const ProductPage = lazy(() => import("./pages/Product.tsx"));
 const CartPage = lazy(() => import("./pages/Cart.tsx"));
 const CheckoutPage = lazy(() => import("./pages/Checkout.tsx"));
@@ -151,6 +152,7 @@ createRoot(document.getElementById("root")!).render(
                   {/* Loja pública */}
                   <Route path="/" element={<Home />} />
                   <Route path="/loja" element={<Catalog />} />
+                  <Route path="/categorias" element={<CategoriesPage />} />
                   <Route path="/produto/:slug" element={<ProductPage />} />
                   <Route path="/carrinho" element={<CartPage />} />
                   <Route path="/checkout" element={<CheckoutPage />} />

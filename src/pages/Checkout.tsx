@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { StoreLayout } from "@/components/store/StoreLayout";
 import { useCart } from "@/lib/cart";
+import { useAuth } from "@/hooks/use-auth";
 import { formatBRL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,18 @@ export default function CheckoutPage() {
   const fields = store?.checkoutFields?.filter((f) => f.enabled) ?? [];
   const [values, setValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const { user, isAuthenticated } = useAuth();
+
+  // pré-preenche com os dados da conta logada (evita erro de e-mail vazio)
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    setValues((s) => ({
+      ...s,
+      name: s.name || user.name || "",
+      email: s.email || user.email || "",
+      discord: s.discord || user.name || "",
+    }));
+  }, [isAuthenticated, user]);
 
   const missingRequired = useMemo(
     () => fields.some((f) => f.required && !(values[f.key] ?? "").trim()),

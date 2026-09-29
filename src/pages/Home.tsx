@@ -197,7 +197,7 @@ function Categories() {
           {categories.slice(0, 6).map((c) => (
             <motion.div key={c._id} variants={fadeUp} whileHover={{ y: -4 }}>
               <Link
-                to={`/loja?categoria=${c.slug}`}
+                to={`/categoria/${c.slug}`}
                 className="group flex items-center gap-4 rounded-2xl border bg-card p-3 transition-all duration-300 hover:border-emerald-500/40 hover:shadow-[0_0_28px_-8px_rgb(16_185_129/0.4)]"
               >
                 <div

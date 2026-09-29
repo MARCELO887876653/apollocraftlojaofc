@@ -56,7 +56,7 @@ export default function CategoriesPage() {
             {categories.map((c) => (
               <motion.div key={c._id} variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { duration: 0.45 } } }} whileHover={{ y: -4 }}>
                 <Link
-                  to={`/loja?categoria=${c.slug}`}
+                  to={`/categoria/${c.slug}`}
                   className="group flex h-full items-center gap-4 rounded-2xl border bg-card p-4 transition-all duration-300 hover:border-emerald-500/40 hover:shadow-[0_0_28px_-8px_rgb(16_185_129/0.4)]"
                 >
                   <div

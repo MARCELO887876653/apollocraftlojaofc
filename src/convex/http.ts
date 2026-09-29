@@ -39,4 +39,37 @@ http.route({
   handler: httpAction(async () => new Response("ok", { status: 200 })),
 });
 
+// ─── API pública para sistemas externos (autenticada por API key) ───
+// Usada por plugins de servidor Minecraft, bots Discord etc. para consultar
+// pedidos e registrar entregas sem acessar o painel.
+
+const externalApi = httpAction(async (ctx, request) => {
+  const key = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "")
+    ?? request.headers.get("x-api-key")
+    ?? "";
+  const url = new URL(request.url);
+  const bodyText = request.method === "POST" ? await request.text() : "";
+  try {
+    const result = await ctx.runAction(api.externalApi.handle, {
+      key,
+      path: url.pathname.replace(/^\/api\/external/, "") || "/",
+      bodyText,
+    });
+    return Response.json(result.body ?? { ok: true }, { status: result.status });
+  } catch (e: any) {
+    return Response.json(
+      { ok: false, error: e?.message ?? "Erro interno" },
+      { status: 500 },
+    );
+  }
+});
+
+for (const method of ["GET", "POST"] as const) {
+  http.route({
+    pathPrefix: "/api/external/",
+    method,
+    handler: externalApi,
+  });
+}
+
 export default http;

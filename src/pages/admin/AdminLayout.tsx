@@ -201,7 +201,7 @@ function AdminShell() {
 
         {/* Bottom tab bar (mobile) */}
         <nav className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">
-          <div className="flex h-16 items-stretch">
+          <div className="flex h-[68px] items-stretch">
             {tabs.map((t) => (
               <NavLink
                 key={t.to}
@@ -209,8 +209,10 @@ function AdminShell() {
                 end={t.end}
                 className={({ isActive }) =>
                   cn(
-                    "flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium",
-                    isActive ? "text-primary" : "text-muted-foreground",
+                    "flex flex-1 flex-col items-center justify-center gap-1 text-[11px] transition-colors",
+                    isActive
+                      ? "font-bold text-primary"
+                      : "font-medium text-muted-foreground hover:text-foreground",
                   )
                 }
               >

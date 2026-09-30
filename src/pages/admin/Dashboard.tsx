@@ -1,15 +1,15 @@
 import { useQuery } from "convex/react";
 import { Link } from "react-router";
 import { api } from "@/convex/_generated/api";
-import { formatBRL, formatRelative, PAYMENT_STATUS_COLOR } from "@/lib/format";
-import { Badge } from "@/components/ui/badge";
+import { formatBRL, formatRelative } from "@/lib/format";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
 import {
-  BarChart3, DollarSign, Truck, AlertTriangle, Clock, ArrowRight, TrendingDown,
+  ChartPie, Clock, ArrowRight, TrendingDown, TrendingUp, Wallet, Receipt,
+  AlertTriangle, Eye,
 } from "lucide-react";
 
 type Stats = {
@@ -24,6 +24,13 @@ type Stats = {
   deliveriesPending: number;
   deliveriesFailed: number;
   series: Array<{ day: string; revenue: number; orders: number }>;
+  monthSeries: Array<{ day: string; revenue: number; orders: number }>;
+  monthRevenue: number;
+  monthOrders: number;
+  monthTrend: number | null;
+  visitsWeek: Array<{ day: string; count: number }>;
+  visitsThisWeek: number;
+  visitsTotal: number;
   topProducts: Array<{ name: string; qty: number; revenue: number }>;
   recentOrders: Array<{
     _id: string; number: string; customerName: string; customerEmail: string;
@@ -31,30 +38,42 @@ type Stats = {
   }>;
 };
 
-function StatCard({
+const tooltipStyle = {
+  borderRadius: 12,
+  border: "1px solid var(--border)",
+  background: "var(--popover)",
+  fontSize: 12,
+} as const;
+
+function KpiCard({
   icon: Icon,
   label,
   value,
   footer,
-  iconClass,
+  tileClass,
 }: {
-  icon: typeof DollarSign;
+  icon: typeof ChartPie;
   label: string;
   value: string;
   footer: string;
-  iconClass: string;
+  tileClass: string;
 }) {
   return (
-    <Card className="gap-0 rounded-2xl py-0">
+    <Card className="gap-0 rounded-2xl py-0 shadow-none">
       <CardContent className="flex flex-col gap-4 p-5">
-        <span className={cn("flex size-12 items-center justify-center rounded-xl", iconClass)}>
-          <Icon className="size-6" />
+        <span
+          className={cn(
+            "flex size-14 items-center justify-center rounded-2xl border border-border/60",
+            tileClass,
+          )}
+        >
+          <Icon className="size-7" strokeWidth={2.2} />
         </span>
         <div>
-          <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="mt-0.5 text-3xl font-extrabold tracking-tight">{value}</p>
+          <p className="text-[15px] text-muted-foreground">{label}</p>
+          <p className="mt-0.5 text-[28px] font-bold leading-tight tracking-tight">{value}</p>
         </div>
-        <div className="flex items-center gap-2 border-t pt-4 text-sm text-muted-foreground">
+        <div className="mt-1 flex items-center gap-2 border-t pt-4 text-sm text-muted-foreground">
           <Clock className="size-4" /> {footer}
         </div>
       </CardContent>
@@ -62,17 +81,36 @@ function StatCard({
   );
 }
 
+function Skeletons() {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="h-56 animate-pulse rounded-2xl bg-muted/60" />
+        ))}
+      </div>
+      <div className="h-72 animate-pulse rounded-2xl bg-muted/60" />
+      <div className="h-56 animate-pulse rounded-2xl bg-muted/60" />
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const stats = useQuery(api.stats.dashboard) as Stats | undefined;
 
-  if (!stats) {
-    return <div className="h-64 animate-pulse rounded-2xl bg-muted" />;
-  }
+  if (!stats) return <Skeletons />;
 
   const monthName = new Date().toLocaleDateString("pt-BR", { month: "long" });
+  const trend = stats.monthTrend;
+  const trendLabel =
+    trend === null
+      ? null
+      : `${trend >= 0 ? "+" : ""}${trend.toLocaleString("pt-BR", {
+          maximumFractionDigits: 1,
+        })}%`;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {(stats.deliveriesFailed > 0 || stats.ordersPending > 0) && (
         <div className="flex flex-wrap gap-3">
           {stats.ordersPending > 0 && (
@@ -94,69 +132,132 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Cards de métricas */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <StatCard
-          icon={BarChart3}
-          label="Vendas hoje"
-          value={formatBRL(stats.revenueToday)}
-          footer="Hoje"
-          iconClass="bg-violet-500/15 text-violet-500"
-        />
-        <StatCard
-          icon={DollarSign}
+      {/* Cards de métricas — estilo CentralCart */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <KpiCard
+          icon={ChartPie}
           label="Total em vendas"
           value={formatBRL(stats.revenueTotal)}
           footer="Vendas de todo o período"
-          iconClass="bg-emerald-500/15 text-emerald-500"
+          tileClass="bg-emerald-500/10 text-emerald-400"
         />
-        <StatCard
-          icon={Truck}
-          label={`Vendas em ${monthName}`}
-          value={`${stats.ordersPaid}`}
-          footer={`${stats.ordersTotal} pedidos no total`}
-          iconClass="bg-sky-500/15 text-sky-500"
+        <KpiCard
+          icon={Wallet}
+          label="Vendas hoje"
+          value={formatBRL(stats.revenueToday)}
+          footer="Faturamento do dia"
+          tileClass="bg-sky-500/10 text-sky-400"
+        />
+        <KpiCard
+          icon={Receipt}
+          label="Ticket médio"
+          value={formatBRL(
+            stats.ordersPaid > 0 ? Math.round(stats.revenueTotal / stats.ordersPaid) : 0,
+          )}
+          footer={`${stats.ordersPaid} pedidos pagos`}
+          tileClass="bg-violet-500/10 text-violet-400"
         />
       </div>
 
-      {/* Gráfico de vendas do mês */}
-      <Card className="gap-0 rounded-2xl py-0">
-        <CardContent className="p-5">
-          <div className="mb-4 flex items-end justify-between gap-4">
+      {/* Vendas do mês + tendência */}
+      <Card className="gap-0 overflow-hidden rounded-2xl py-0 shadow-none">
+        <CardContent className="p-5 pb-0">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm text-muted-foreground">Vendas em {monthName}</p>
-              <p className="text-3xl font-extrabold tracking-tight">{formatBRL(stats.revenue30)}</p>
+              <p className="text-[15px] text-muted-foreground">
+                Vendas em {monthName} ({stats.monthOrders})
+              </p>
+              <p className="mt-0.5 text-[28px] font-bold leading-tight tracking-tight">
+                {formatBRL(stats.monthRevenue)}
+              </p>
             </div>
+            {trendLabel && (
+              <span
+                className={cn(
+                  "mt-1 flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-semibold",
+                  trend! >= 0
+                    ? "bg-emerald-500/10 text-emerald-400"
+                    : "bg-red-500/10 text-red-400",
+                )}
+              >
+                {trend! >= 0 ? (
+                  <TrendingUp className="size-4" />
+                ) : (
+                  <TrendingDown className="size-4" />
+                )}
+                {trendLabel}
+              </span>
+            )}
           </div>
-          <div className="h-52">
+        </CardContent>
+        <div className="-mx-2 h-44 pb-1">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={stats.monthSeries} margin={{ top: 16, right: 8, bottom: 0, left: 8 }}>
+              <defs>
+                <linearGradient id="dashMonth" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#fb923c" stopOpacity={0.45} />
+                  <stop offset="100%" stopColor="#fb923c" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="day" hide />
+              <YAxis hide />
+              <Tooltip
+                formatter={(v: number) => formatBRL(Math.round(v * 100))}
+                contentStyle={tooltipStyle}
+                labelStyle={{ color: "var(--muted-foreground)" }}
+                cursor={{ stroke: "var(--border)" }}
+              />
+              <Area
+                type="monotone"
+                dataKey="revenue"
+                stroke="#fb923c"
+                strokeWidth={2.5}
+                fill="url(#dashMonth)"
+                activeDot={{ r: 4, strokeWidth: 0 }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      {/* Visitas na loja */}
+      <Card className="gap-0 rounded-2xl py-0 shadow-none">
+        <CardContent className="p-5">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <p className="flex items-center gap-2 text-[15px] text-muted-foreground">
+              <Eye className="size-4" /> Visitas na loja
+            </p>
+            <span className="text-sm text-muted-foreground">Esta semana</span>
+          </div>
+          <div className="h-40">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={stats.series} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="dashRev" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
-                <XAxis dataKey="day" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis fontSize={11} tickLine={false} axisLine={false} width={44} />
+              <BarChart data={stats.visitsWeek} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                <XAxis dataKey="day" hide />
+                <YAxis hide />
                 <Tooltip
-                  formatter={(v: number) => formatBRL(Math.round(v * 100))}
-                  contentStyle={{
-                    borderRadius: 12,
-                    border: "1px solid var(--border)",
-                    background: "var(--popover)",
-                  }}
+                  formatter={(v: number) => [`${v} visitas`, ""]}
+                  contentStyle={tooltipStyle}
+                  cursor={{ fill: "var(--muted)", opacity: 0.4 }}
                 />
-                <Area type="monotone" dataKey="revenue" stroke="#f59e0b" fill="url(#dashRev)" strokeWidth={2.5} />
-              </AreaChart>
+                <Bar
+                  dataKey="count"
+                  fill="#ec4899"
+                  radius={[6, 6, 6, 6]}
+                  maxBarSize={22}
+                />
+              </BarChart>
             </ResponsiveContainer>
           </div>
+          <p className="mt-3 border-t pt-3 text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground">{stats.visitsThisWeek}</span> visitas
+            esta semana · <span className="font-semibold text-foreground">{stats.visitsTotal}</span>{" "}
+            no total
+          </p>
         </CardContent>
       </Card>
 
       {/* Últimos pagamentos */}
-      <Card className="gap-0 rounded-2xl py-0">
+      <Card className="gap-0 rounded-2xl py-0 shadow-none">
         <CardContent className="p-0">
           <p className="px-5 pb-2 pt-5 text-sm font-semibold text-muted-foreground">
             Últimos pagamentos
@@ -200,7 +301,7 @@ export default function AdminDashboard() {
       </Card>
 
       {/* Top produtos */}
-      <Card className="gap-0 rounded-2xl py-0">
+      <Card className="gap-0 rounded-2xl py-0 shadow-none">
         <CardContent className="p-5">
           <p className="pb-3 text-sm font-semibold text-muted-foreground">Top produtos</p>
           {stats.topProducts.length === 0 && (
@@ -221,14 +322,6 @@ export default function AdminDashboard() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Aviso de pedidos pendentes / badges auxiliares */}
-      {stats.ordersPending > 0 && (
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <TrendingDown className="size-3.5" /> Há pedidos aguardando confirmação de pagamento.
-          <Badge variant="outline" className={cn("ml-1", PAYMENT_STATUS_COLOR.pending)}>pendente</Badge>
-        </p>
-      )}
     </div>
   );
 }

@@ -369,6 +369,14 @@ const schema = defineSchema(
       createdAt: v.number(),
     }).index("by_createdAt", ["createdAt"]),
 
+    // ─── Visitantes da loja (1 doc por dia, contador incremental) ───
+    visits: defineTable({
+      day: v.string(), // "YYYY-MM-DD" (fuso do servidor)
+      count: v.number(),
+      createdAt: v.number(),
+      lastPath: v.optional(v.string()),
+    }).index("by_day", ["day"]),
+
     // ─── Rate limiting simples em rotas sensíveis ───
     rateLimits: defineTable({
       key: v.string(),

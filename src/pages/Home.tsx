@@ -12,6 +12,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { ProductCard } from "@/components/store/ProductCard";
+import { VisitTracker } from "@/components/store/VisitTracker";
 
 type Section = { id: string; type: string; enabled: boolean; config?: any };
 type Product = any;
@@ -278,6 +279,7 @@ export default function Home() {
 
   return (
     <>
+      <VisitTracker />
       {homepage
         .filter((s) => s.enabled)
         .map((section) => {

@@ -12,7 +12,7 @@ import { Loader2, Plus, Trash2 } from "lucide-react";
 
 type Store = {
   name: string; description: string; logoUrl: string; faviconUrl: string;
-  currency: string; email: string; discord: string; whatsapp: string;
+  currency: string; email: string; serverIp?: string; discord: string; whatsapp: string;
   instagram: string; twitter: string; youtube: string;
   maintenance: { enabled: boolean; title: string; message: string; eta: string };
   checkoutFields: Array<{ key: string; label: string; enabled: boolean; required: boolean }>;
@@ -54,6 +54,7 @@ export default function AdminSettings() {
         logoUrl: form.logoUrl,
         faviconUrl: form.faviconUrl,
         email: form.email,
+        serverIp: form.serverIp ?? "",
         discord: form.discord,
         whatsapp: form.whatsapp,
         instagram: form.instagram,
@@ -108,6 +109,14 @@ export default function AdminSettings() {
           <div>
             <Label>E-mail de contato</Label>
             <Input value={form.email} onChange={(e) => set("email", e.target.value)} />
+          </div>
+          <div>
+            <Label>IP do servidor Minecraft</Label>
+            <Input
+              value={form.serverIp ?? ""}
+              onChange={(e) => set("serverIp", e.target.value)}
+              placeholder="apollo.srvmc.com:19132"
+            />
           </div>
           <div>
             <Label>Moeda</Label>

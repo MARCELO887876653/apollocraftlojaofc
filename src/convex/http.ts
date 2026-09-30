@@ -72,18 +72,4 @@ for (const method of ["GET", "POST"] as const) {
   });
 }
 
-// ─── Rastreamento de visitas da loja (sem autenticação) ───
-http.route({
-  path: "/api/track-visit",
-  method: "POST",
-  handler: httpAction(async (ctx) => {
-    try {
-      await ctx.runMutation(api.stats.trackVisit, {});
-    } catch (e) {
-      console.error("[track-visit] error:", e);
-    }
-    return new Response(null, { status: 204 });
-  }),
-});
-
 export default http;

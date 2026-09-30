@@ -54,6 +54,7 @@ export const DEFAULT_STORE = {
   faviconUrl: "",
   currency: "BRL",
   email: "",
+  serverIp: "",
   discord: "",
   whatsapp: "",
   instagram: "",

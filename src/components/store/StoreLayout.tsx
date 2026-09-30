@@ -4,7 +4,9 @@ import { Link, useLocation } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/hooks/use-auth";
-import { ShoppingBag, ShoppingCart, Menu, X, Zap, MessageCircle, User, ShieldCheck } from "lucide-react";
+import {
+  ShoppingBag, ShoppingCart, Menu, X, MessageCircle, User, Check, Search,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -38,35 +40,43 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   const navItems = (menu ?? []).filter(Boolean);
+  const storeName = store?.name ?? "ApolloCraft";
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <header
         className={cn(
-          "sticky top-0 z-40 transition-all duration-300",
+          "sticky top-0 z-40 border-b transition-all duration-300",
           scrolled
-            ? "border-b border-border/80 bg-background/85 shadow-[0_8px_30px_rgb(0,0,0,0.35)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/70"
-            : "border-b border-transparent bg-background/60 backdrop-blur-md",
+            ? "border-border/80 bg-background/85 shadow-[0_8px_30px_rgb(0,0,0,0.35)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/70"
+            : "border-transparent bg-background/60 backdrop-blur-md",
         )}
       >
-        <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-4 px-4">
-          <Link to="/" className="group flex items-center gap-2.5">
+        <div className="mx-auto flex h-[72px] w-full max-w-7xl items-center gap-3 px-4">
+          <Link to="/" className="group flex min-w-0 items-center gap-3">
             {store?.logoUrl ? (
-              <img src={store.logoUrl} alt={store.name} className="h-10 w-10 rounded-lg object-cover" />
+              <img
+                src={store.logoUrl}
+                alt={storeName}
+                className="size-11 shrink-0 rounded-xl object-cover"
+              />
             ) : (
-              <span className="relative flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-500/25 transition-transform group-hover:scale-105">
+              <span className="relative flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-500/25 transition-transform group-hover:scale-105">
                 <ShoppingBag className="size-5 text-emerald-950" />
               </span>
             )}
-            <span className="text-lg font-extrabold tracking-tight">
-              {store?.name ?? "ApolloCraft"}
+            <span className="truncate text-xl font-extrabold tracking-tight">
+              Loja - {storeName}
             </span>
-            <span className="hidden size-5 items-center justify-center rounded-full bg-sky-500 sm:flex" title="Loja verificada">
-              <ShieldCheck className="size-3.5 text-white" />
+            <span
+              className="flex size-5 shrink-0 items-center justify-center rounded-full bg-sky-500"
+              title="Loja verificada"
+            >
+              <Check className="size-3.5 text-white" strokeWidth={3.5} />
             </span>
           </Link>
 
-          <nav className="ml-6 hidden items-center gap-1 md:flex">
+          <nav className="ml-4 hidden items-center gap-1 md:flex">
             {(navItems.length ? navItems : [{ label: "Início", url: "/" }]).map((item, i) => (
               <a
                 key={i}
@@ -85,27 +95,48 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
 
           <div className="ml-auto flex items-center gap-2">
             {authLoading ? null : isAuthenticated ? (
-              <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className="hidden text-muted-foreground hover:text-foreground sm:inline-flex"
+              >
                 <Link to="/conta">
                   <User className="mr-1.5 size-4" /> Minha conta
                 </Link>
               </Button>
             ) : (
-              <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className="hidden text-muted-foreground hover:text-foreground sm:inline-flex"
+              >
                 <Link to="/auth?returnTo=%2Fconta">Entrar</Link>
               </Button>
             )}
+            <Button
+              variant="ghost"
+              size="icon"
+              asChild
+              aria-label="Buscar produtos"
+              className="rounded-full text-muted-foreground hover:text-foreground"
+            >
+              <Link to="/loja">
+                <Search className="size-5" />
+              </Link>
+            </Button>
             <Button
               variant="white"
               size="icon-lg"
               asChild
               aria-label="Carrinho"
-              className="rounded-full text-lg"
+              className="relative rounded-2xl"
             >
               <Link to="/carrinho">
                 <ShoppingCart className="size-5" />
                 {cart.totalCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-bold text-emerald-950 shadow-md shadow-emerald-500/40">
+                  <span className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-foreground text-[10px] font-bold text-background ring-2 ring-background">
                     {cart.totalCount}
                   </span>
                 )}
@@ -139,42 +170,68 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
 
       <main className="flex-1">{children}</main>
 
-      <footer className="relative mt-auto border-t bg-muted/20">
-        <div className="mx-auto flex w-full max-w-3xl flex-col items-center gap-6 px-4 py-14 text-center">
+      <footer className="mt-auto border-t bg-muted/20">
+        <div className="mx-auto flex w-full max-w-3xl flex-col items-center gap-5 px-4 py-14 text-center">
           {store?.logoUrl ? (
-            <img src={store.logoUrl} alt={store.name} className="size-14 rounded-xl object-cover" />
+            <img src={store.logoUrl} alt={storeName} className="size-16 rounded-2xl object-cover" />
           ) : (
-            <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-500/25">
-              <ShoppingBag className="size-6 text-emerald-950" />
+            <span className="flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-500/25">
+              <ShoppingBag className="size-7 text-emerald-950" />
             </span>
           )}
-          <p className="text-2xl font-extrabold tracking-tight">{store?.name ?? "ApolloCraft"}</p>
-          <p className="max-w-md text-sm text-muted-foreground">
-            {store?.description ?? "Evolua o mais rápido possível com nossos kits exclusivos da nossa loja!"}
+          <p className="text-2xl font-extrabold tracking-tight sm:text-3xl">Loja - {storeName}</p>
+          <p className="max-w-md text-sm text-muted-foreground sm:text-base">
+            {store?.description ??
+              "Evolua o mais rápido possível com nossos kits exclusivos da nossa loja!"}
           </p>
-          <div className="flex flex-col items-center gap-2.5">
-            <p className="font-bold">Acesse:</p>
-            <Link to="/" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Página Inicial</Link>
-            <Link to="/loja" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Nossa Loja</Link>
-            <Link to="/p/termos" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Termos de Serviço</Link>
-            <Link to="/blog" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Blog</Link>
-            <Link to="/conta" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Minha Conta</Link>
-            <Link to="/painel" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Painel Admin</Link>
+          <div className="flex flex-col items-center gap-2.5 pt-2">
+            <p className="text-lg font-extrabold">Acesse:</p>
+            <Link to="/" className="text-sm text-muted-foreground transition-colors hover:text-foreground sm:text-base">
+              Página Inicial
+            </Link>
+            <Link to="/loja" className="text-sm text-muted-foreground transition-colors hover:text-foreground sm:text-base">
+              Nossa Loja
+            </Link>
+            <Link to="/p/termos" className="text-sm text-muted-foreground transition-colors hover:text-foreground sm:text-base">
+              Termos de Serviço
+            </Link>
+            <Link to="/blog" className="text-sm text-muted-foreground transition-colors hover:text-foreground sm:text-base">
+              Blog
+            </Link>
+            <Link to="/conta" className="text-sm text-muted-foreground transition-colors hover:text-foreground sm:text-base">
+              Minha Conta
+            </Link>
+            <Link to="/painel" className="text-sm text-muted-foreground transition-colors hover:text-foreground sm:text-base">
+              Painel Admin
+            </Link>
           </div>
           <div className="flex items-center gap-4 pt-1">
             {store?.discord && (
-              <a href={store.discord} target="_blank" rel="noreferrer" aria-label="Discord" className="text-muted-foreground transition-colors hover:text-foreground">
+              <a
+                href={store.discord}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Discord"
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
                 <MessageCircle className="size-5" />
               </a>
             )}
             {store?.whatsapp && (
-              <a href={store.whatsapp} target="_blank" rel="noreferrer" aria-label="WhatsApp" className="text-muted-foreground transition-colors hover:text-foreground">
-                <Zap className="size-5" />
+              <a
+                href={store.whatsapp}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="WhatsApp"
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ShoppingBag className="size-5" />
               </a>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} {store?.name ?? "ApolloCraft"} · Todos os direitos reservados
+          <p className="text-sm text-muted-foreground">
+            Copyright © {new Date().getFullYear()} Loja - {storeName}. Todos os direitos
+            reservados.
           </p>
         </div>
       </footer>

@@ -38,6 +38,24 @@ export const adminGet = query({
   },
 });
 
+// ─── Público: Top 3 compradores (ranking da home) ───
+
+export const topBuyers = query({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db.query("customers").collect();
+    return all
+      .filter((c) => c.ordersCount > 0 && c.totalSpentCents > 0)
+      .sort((a, b) => b.totalSpentCents - a.totalSpentCents)
+      .slice(0, 3)
+      .map((c) => ({
+        _id: c._id,
+        name: c.name || c.minecraftNick || c.email.split("@")[0],
+        totalSpentCents: c.totalSpentCents,
+      }));
+  },
+});
+
 // ─── Conta do cliente (autenticado) ───
 
 export const myOrders = query({

@@ -123,6 +123,7 @@ const storePatch = v.object({
   faviconUrl: v.optional(v.string()),
   currency: v.optional(v.string()),
   email: v.optional(v.string()),
+  serverIp: v.optional(v.string()),
   discord: v.optional(v.string()),
   whatsapp: v.optional(v.string()),
   instagram: v.optional(v.string()),

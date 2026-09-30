@@ -2,8 +2,10 @@ import { useQuery } from "convex/react";
 import { motion } from "framer-motion";
 import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
+import { toast } from "sonner";
 import {
-  ShoppingBag, Zap, ShieldCheck, Clock, List, ArrowRight,
+  ShoppingBag, ShieldCheck, List, ArrowRight, Send, Headphones, Swords,
+  Terminal, Copy, Trophy, Crown, User, Wallet, Star, HelpCircle,
 } from "lucide-react";
 import {
   Accordion,
@@ -11,12 +13,16 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { Button } from "@/components/ui/button";
 import { ProductCard } from "@/components/store/ProductCard";
 import { VisitTracker } from "@/components/store/VisitTracker";
+import { formatBRL } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 type Section = { id: string; type: string; enabled: boolean; config?: any };
 type Product = any;
 type Category = { _id: string; name: string; slug: string; icon?: string; color?: string; image?: string; description?: string };
+type Buyer = { _id: string; name: string; totalSpentCents: number };
 
 const fadeUp = {
   hidden: { opacity: 0, y: 24 },
@@ -142,12 +148,24 @@ function Hero() {
   );
 }
 
+/** Cards grandes e centralizados — estilo CentralCart. */
 function Benefits() {
   const items = [
-    { icon: Zap, title: "Entrega automática", text: "Receba na hora, assim que o PIX cair." },
-    { icon: ShieldCheck, title: "Pagamento seguro", text: "Processado pelo Mercado Pago." },
-    { icon: Clock, title: "Suporte 24/7", text: "Atendimento no Discord sempre aberto." },
-    { icon: ShoppingBag, title: "Estoque real", text: "Kits e VIPs sempre disponíveis." },
+    {
+      icon: Send,
+      title: "Envio imediato",
+      text: "Receba pelo pacote que comprou em poucos segundos após a confirmação do pagamento.",
+    },
+    {
+      icon: Headphones,
+      title: "Suporte eficiente",
+      text: "Em caso de dúvidas, entre em contato com o nosso suporte clicando em Suporte no topo da página.",
+    },
+    {
+      icon: ShieldCheck,
+      title: "Compra segura",
+      text: "Seus dados são criptografados de ponta-a-ponta e processados pelo método de pagamento escolhido.",
+    },
   ];
   return (
     <section className="border-b">
@@ -156,22 +174,19 @@ function Benefits() {
         initial="hidden"
         whileInView="show"
         viewport={{ once: true, margin: "-60px" }}
-        className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-3 px-4 py-10 sm:gap-4 lg:grid-cols-4"
+        className="mx-auto w-full max-w-2xl space-y-4 px-4 py-12"
       >
         {items.map((item) => (
           <motion.div
             key={item.title}
             variants={fadeUp}
-            whileHover={{ y: -3 }}
-            className="flex items-start gap-3 rounded-2xl border bg-card p-4"
+            className="flex flex-col items-center rounded-3xl border bg-card p-8 text-center"
           >
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-              <item.icon className="size-5" />
+            <span className="flex size-16 items-center justify-center rounded-2xl bg-muted">
+              <item.icon className="size-7" strokeWidth={2.2} />
             </span>
-            <div className="min-w-0">
-              <p className="text-sm font-bold">{item.title}</p>
-              <p className="mt-0.5 hidden text-sm text-muted-foreground sm:block">{item.text}</p>
-            </div>
+            <h3 className="mt-5 text-2xl font-extrabold tracking-tight">{item.title}</h3>
+            <p className="mt-2 text-sm text-muted-foreground sm:text-base">{item.text}</p>
           </motion.div>
         ))}
       </motion.div>
@@ -190,19 +205,19 @@ function Categories() {
           initial={{ opacity: 0, y: 12 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="neon-border mb-5 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-1.5 text-sm font-semibold text-muted-foreground"
+          className="mb-5 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm font-semibold text-muted-foreground"
         >
-          <List className="size-4 text-emerald-500" /> Categorias populares
+          <List className="size-4" /> Categorias populares
         </motion.span>
         <motion.div variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: "-60px" }} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {categories.slice(0, 6).map((c) => (
             <motion.div key={c._id} variants={fadeUp} whileHover={{ y: -4 }}>
               <Link
                 to={`/categoria/${c.slug}`}
-                className="group flex items-center gap-4 rounded-2xl border bg-card p-3 transition-all duration-300 hover:border-emerald-500/40 hover:shadow-[0_0_28px_-8px_rgb(16_185_129/0.4)]"
+                className="group flex items-center gap-4 rounded-3xl border bg-card p-4 transition-all duration-300 hover:border-emerald-500/40 hover:shadow-[0_0_28px_-8px_rgb(16_185_129/0.4)]"
               >
                 <div
-                  className="relative size-20 shrink-0 overflow-hidden rounded-xl transition-transform duration-300 group-hover:scale-105 sm:size-24"
+                  className="relative size-28 shrink-0 overflow-hidden rounded-2xl transition-transform duration-300 group-hover:scale-105"
                   style={c.color ? { boxShadow: `0 0 42px -8px ${c.color}` } : undefined}
                 >
                   {c.image ? (
@@ -217,11 +232,13 @@ function Categories() {
                   )}
                 </div>
                 <div className="min-w-0 flex-1 py-1">
-                  <p className="truncate text-base font-extrabold uppercase tracking-tight sm:text-lg">{c.name}</p>
-                  <p className="mt-0.5 line-clamp-2 hidden text-sm text-muted-foreground sm:block">
-                    {c.description ?? `Veja os itens disponíveis de ${c.name}.`}
+                  <p className="line-clamp-2 text-xl font-extrabold uppercase leading-tight tracking-tight">
+                    {c.name}
                   </p>
-                  <span className="neon-glow mt-2.5 inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 text-sm font-bold text-zinc-950 transition-colors group-hover:bg-zinc-200">
+                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                    {c.description ?? "Veja os itens disponíveis desta categoria."}
+                  </p>
+                  <span className="mt-3 inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-full bg-white px-5 text-sm font-bold text-zinc-950 transition-colors group-hover:bg-zinc-200">
                     Ver produtos <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
                   </span>
                 </div>
@@ -229,6 +246,159 @@ function Categories() {
             </motion.div>
           ))}
         </motion.div>
+      </div>
+    </section>
+  );
+}
+
+/** Card "Conecte-se ao servidor" com IP copiável. */
+function ServerSection() {
+  const store = useQuery(api.settings.getStore) as { serverIp?: string } | undefined;
+  const ip = store?.serverIp;
+  if (!ip) return null;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(ip);
+      toast.success("IP copiado!");
+    } catch {
+      toast.error("Não foi possível copiar o IP.");
+    }
+  };
+
+  return (
+    <section className="border-b">
+      <div className="mx-auto w-full max-w-2xl px-4 py-12">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-60px" }}
+          className="relative overflow-hidden rounded-3xl border bg-card p-6 sm:p-8"
+        >
+          <div className="pointer-events-none absolute -right-20 -top-20 size-64 rounded-full bg-primary/10 blur-3xl" aria-hidden />
+          <span className="flex size-16 items-center justify-center rounded-2xl bg-muted">
+            <Swords className="size-7" strokeWidth={2.2} />
+          </span>
+          <h3 className="mt-6 text-2xl font-extrabold tracking-tight">Conecte-se ao servidor</h3>
+          <p className="mt-2 text-sm text-muted-foreground sm:text-base">
+            Copie o endereço abaixo e entre no jogo agora mesmo.
+          </p>
+          <div className="mt-5 flex items-center gap-2.5 rounded-xl bg-muted/70 px-4 py-3 font-mono text-sm sm:text-base">
+            <Terminal className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{ip}</span>
+          </div>
+          <Button
+            onClick={copy}
+            className="mt-4 h-12 w-full rounded-2xl bg-white text-base font-bold text-zinc-950 hover:bg-zinc-200"
+          >
+            <Copy className="mr-2 size-4.5" /> Copiar IP
+          </Button>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+/** Ranking Top 3 compradores — estilo pódio CentralCart. */
+const RANKS = [
+  {
+    ring: "border-amber-400/70",
+    avatarRing: "ring-2 ring-amber-400/70",
+    badge: "bg-amber-400 text-amber-950",
+    price: "text-amber-400",
+    crown: true,
+    stars: 3,
+    star: "text-amber-400",
+  },
+  {
+    ring: "border-zinc-500/50",
+    avatarRing: "ring-2 ring-zinc-500/60",
+    badge: "bg-zinc-400 text-zinc-950",
+    price: "text-muted-foreground",
+    crown: false,
+    stars: 2,
+    star: "text-zinc-400",
+  },
+  {
+    ring: "border-orange-500/60",
+    avatarRing: "ring-2 ring-orange-500/60",
+    badge: "bg-orange-500 text-white",
+    price: "text-orange-400",
+    crown: false,
+    stars: 1,
+    star: "text-orange-400",
+  },
+];
+
+function TopBuyers() {
+  const buyers = useQuery(api.customers.topBuyers) as Buyer[] | undefined;
+  if (!buyers?.length) return null;
+
+  return (
+    <section className="border-b">
+      <div className="mx-auto w-full max-w-xl px-4 py-12 text-center">
+        <motion.span
+          initial={{ opacity: 0, y: 12 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm font-semibold text-muted-foreground"
+        >
+          <Trophy className="size-4 text-amber-400" /> Top 3 compradores
+        </motion.span>
+        <motion.h2
+          initial={{ opacity: 0, y: 16 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="mt-5 text-3xl font-extrabold tracking-tight sm:text-4xl"
+        >
+          Nossos maiores compradores
+        </motion.h2>
+        <p className="mt-3 text-sm text-muted-foreground sm:text-base">
+          Nossos campeões de compras estão aqui — confira o ranking mensal!
+        </p>
+
+        <div className="mt-12 space-y-8">
+          {buyers.map((b, i) => {
+            const r = RANKS[i] ?? RANKS[2];
+            return (
+              <motion.div
+                key={b._id}
+                initial={{ opacity: 0, y: 24 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-40px" }}
+                className={cn("relative rounded-3xl border bg-card px-6 pb-8 pt-10", r.ring)}
+              >
+                {r.crown && (
+                  <span className="absolute -top-7 left-1/2 flex size-14 -translate-x-1/2 items-center justify-center rounded-full bg-amber-400 shadow-lg shadow-amber-500/30">
+                    <Crown className="size-6 text-amber-950" />
+                  </span>
+                )}
+                <div className="relative mx-auto w-fit">
+                  <span className={cn("flex size-24 items-center justify-center rounded-full bg-muted", r.avatarRing)}>
+                    <User className="size-10 text-muted-foreground" />
+                  </span>
+                  <span
+                    className={cn(
+                      "absolute -bottom-1 -right-1 flex size-8 items-center justify-center rounded-full text-sm font-extrabold ring-2 ring-background",
+                      r.badge,
+                    )}
+                  >
+                    {i + 1}
+                  </span>
+                </div>
+                <p className="mt-4 truncate text-xl font-extrabold tracking-tight">{b.name}</p>
+                <p className={cn("mt-1 flex items-center justify-center gap-2 text-lg font-bold", r.price)}>
+                  <Wallet className="size-5" /> {formatBRL(b.totalSpentCents)}
+                </p>
+                <div className="mt-3 flex items-center justify-center gap-1.5">
+                  {Array.from({ length: r.stars }).map((_, s) => (
+                    <Star key={s} className={cn("size-5 fill-current", r.star)} />
+                  ))}
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
@@ -259,16 +429,42 @@ function FaqSection() {
   if (!faqs?.length) return null;
   return (
     <section className="border-b">
-      <div className="mx-auto w-full max-w-3xl px-4 py-12">
-        <SectionHeader title="Perguntas frequentes" />
-        <Accordion type="single" collapsible>
-          {faqs.slice(0, 8).map((f) => (
-            <AccordionItem key={f._id} value={f._id}>
-              <AccordionTrigger className="text-left">{f.question}</AccordionTrigger>
-              <AccordionContent className="text-muted-foreground">{f.answer}</AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+      <div className="mx-auto w-full max-w-3xl px-4 py-12 text-center">
+        <motion.span
+          initial={{ opacity: 0, y: 12 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm font-semibold text-muted-foreground"
+        >
+          <HelpCircle className="size-4 text-emerald-400" /> FAQ
+        </motion.span>
+        <motion.h2
+          initial={{ opacity: 0, y: 16 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="mt-5 text-3xl font-extrabold tracking-tight sm:text-4xl"
+        >
+          Perguntas frequentes
+        </motion.h2>
+        <p className="mt-3 text-sm text-muted-foreground sm:text-base">
+          Veja as perguntas mais comuns e suas respostas
+        </p>
+        <div className="mt-8 text-left">
+          <Accordion type="single" collapsible>
+            {faqs.slice(0, 8).map((f) => (
+              <AccordionItem
+                key={f._id}
+                value={f._id}
+                className="mb-3 rounded-2xl border bg-card px-5 last:border-b-0"
+              >
+                <AccordionTrigger className="text-left text-base font-bold hover:no-underline sm:text-lg">
+                  {f.question}
+                </AccordionTrigger>
+                <AccordionContent className="pb-5 text-muted-foreground">{f.answer}</AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        </div>
       </div>
     </section>
   );
@@ -299,12 +495,14 @@ export default function Home() {
               return <Popular key={section.id} config={cfg} />;
             case "new":
               return <Newest key={section.id} config={cfg} />;
-            case "faq":
-              return <FaqSection key={section.id} />;
             default:
               return null;
           }
         })}
+      {/* Seções fixas no rodapé da home (ordem do CentralCart) */}
+      <ServerSection />
+      <TopBuyers />
+      <FaqSection />
     </>
   );
 }

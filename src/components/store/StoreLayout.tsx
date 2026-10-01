@@ -3,12 +3,11 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { useCart } from "@/lib/cart";
-import { useAuth } from "@/hooks/use-auth";
+import { cn } from "@/lib/utils";
 import {
   ShoppingBag, ShoppingCart, Menu, X, MessageCircle, User, Check, Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 type Store = {
   name: string;
@@ -24,7 +23,6 @@ type MenuItem = { label: string; url: string; newTab?: boolean };
 export function StoreLayout({ children }: { children: React.ReactNode }) {
   const store = useQuery(api.settings.getStore) as Store | undefined;
   const menu = useQuery(api.settings.getMenu) as MenuItem[] | undefined;
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const cart = useCart();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -94,27 +92,17 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            {authLoading ? null : isAuthenticated ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                asChild
-                className="hidden text-muted-foreground hover:text-foreground sm:inline-flex"
-              >
-                <Link to="/conta">
-                  <User className="mr-1.5 size-4" /> Minha conta
-                </Link>
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                asChild
-                className="hidden text-muted-foreground hover:text-foreground sm:inline-flex"
-              >
-                <Link to="/auth?returnTo=%2Fconta">Entrar</Link>
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              asChild
+              aria-label="Minha conta"
+              className="rounded-full text-muted-foreground hover:text-foreground"
+            >
+              <Link to="/conta">
+                <User className="size-5" />
+              </Link>
+            </Button>
             <Button
               variant="ghost"
               size="icon"

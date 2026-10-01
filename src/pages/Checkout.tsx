@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
+import { motion } from "framer-motion";
 import { api } from "@/convex/_generated/api";
 import { StoreLayout } from "@/components/store/StoreLayout";
 import { useCart } from "@/lib/cart";
@@ -8,11 +9,10 @@ import { useAuth } from "@/hooks/use-auth";
 import { formatBRL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Loader2, ShoppingBag, ArrowRight } from "lucide-react";
+import { Loader2, ShoppingBag, ChevronRight, Lock, Zap, Plus, Minus, X, Ticket } from "lucide-react";
 
 type Store = { name: string; checkoutFields: Array<{ key: string; label: string; enabled: boolean; required: boolean }> };
 
@@ -25,6 +25,7 @@ export default function CheckoutPage() {
   const fields = store?.checkoutFields?.filter((f) => f.enabled) ?? [];
   const [values, setValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [accepted, setAccepted] = useState(false);
   const { user, isAuthenticated } = useAuth();
 
   // pré-preenche com os dados da conta logada (evita erro de e-mail vazio)
@@ -47,6 +48,10 @@ export default function CheckoutPage() {
 
   const submit = async () => {
     if (!cart.items.length) return;
+    if (!accepted) {
+      toast.error("Aceite os termos e condições para continuar.");
+      return;
+    }
     for (const f of fields) {
       if (f.required && !(values[f.key] ?? "").trim()) {
         toast.error(`${f.label} é obrigatório`);
@@ -93,98 +98,215 @@ export default function CheckoutPage() {
 
   return (
     <StoreLayout>
-      <div className="mx-auto w-full max-w-5xl px-4 py-10">
-        <h1 className="text-3xl font-bold tracking-tight">Finalizar compra</h1>
+      <div className="mx-auto w-full max-w-3xl px-4 py-8">
+        {/* Breadcrumb */}
+        <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">Checkout</h1>
+        <nav className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Link to="/" className="transition-colors hover:text-foreground">Início</Link>
+          <ChevronRight className="size-4" />
+          <span>Checkout</span>
+        </nav>
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_380px]">
-          <div className="rounded-xl border bg-card p-6">
-            <h2 className="font-semibold">Seus dados</h2>
-            {fields.length === 0 && (
-              <p className="mt-3 text-sm text-muted-foreground">
-                Nenhum campo configurado — preencha apenas o essencial.
+        {/* Formas de pagamento */}
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-6 rounded-3xl border bg-card p-5 sm:p-6"
+        >
+          <h2 className="text-xl font-extrabold tracking-tight">Formas de pagamento</h2>
+          <div className="mt-4 flex items-center gap-3 rounded-2xl border-2 border-foreground/80 p-4">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="size-5">
+                <path d="M6 3h12l4 6-10 12L2 9l4-6Zm2.4 2L6 8.4 12 15l6-6.6L15.6 5H8.4Z" />
+              </svg>
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="flex flex-wrap items-center gap-2 text-base font-bold">
+                Pix
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-bold text-red-500">
+                  <Zap className="size-3" /> Mais rápido
+                </span>
               </p>
-            )}
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              {fields.map((f) => (
-                <div key={f.key} className={f.key === "name" ? "sm:col-span-2" : undefined}>
-                  <Label htmlFor={f.key}>
-                    {f.label} {f.required && <span className="text-red-500">*</span>}
-                  </Label>
-                  <Input
-                    id={f.key}
-                    type={f.key === "email" ? "email" : "text"}
-                    value={values[f.key] ?? ""}
-                    onChange={(e) => set(f.key, e.target.value)}
-                    placeholder={f.label}
-                    className="mt-1.5"
-                  />
-                </div>
-              ))}
-            </div>
-
-            <Separator className="my-6" />
-
-            <h2 className="font-semibold">Itens do pedido</h2>
-            <div className="mt-3 space-y-2">
-              {cart.items.map((item) => (
-                <div key={`${item.productId}-${item.variantId ?? "b"}`} className="flex items-center justify-between text-sm">
-                  <span>
-                    {item.quantity}× {item.name}
-                    {item.variantName ? ` — ${item.variantName}` : ""}
-                  </span>
-                  <span className="font-medium">{formatBRL(item.unitPriceCents * item.quantity)}</span>
-                </div>
-              ))}
+              <p className="text-sm text-muted-foreground">Aprovação imediata</p>
             </div>
           </div>
+        </motion.section>
 
-          <div className="h-fit rounded-xl border bg-card p-6 lg:sticky lg:top-24">
-            <h2 className="font-semibold">Pagamento</h2>
-            <div className="mt-3 flex items-center gap-2 rounded-lg border bg-muted/50 p-3 text-sm">
-              <span className="text-lg">🟢</span>
-              <div>
-                <p className="font-medium">PIX — Mercado Pago</p>
-                <p className="text-xs text-muted-foreground">Confirmação automática após o pagamento</p>
+        {/* Informações de contato */}
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.06 }}
+          className="mt-4 rounded-3xl border bg-card p-5 sm:p-6"
+        >
+          <h2 className="text-xl font-extrabold tracking-tight">Informações de contato</h2>
+          {fields.length === 0 && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              Nenhum campo configurado — preencha apenas o essencial.
+            </p>
+          )}
+          <div className="mt-4 space-y-3">
+            {fields.map((f) => (
+              <Input
+                key={f.key}
+                id={f.key}
+                type={f.key === "email" ? "email" : "text"}
+                value={values[f.key] ?? ""}
+                onChange={(e) => set(f.key, e.target.value)}
+                placeholder={f.label + (f.required ? " *" : "")}
+                className="h-12 rounded-2xl border-border bg-muted/40 px-5 text-base placeholder:text-muted-foreground"
+              />
+            ))}
+          </div>
+        </motion.section>
+
+        {/* Termos + Pagar */}
+        <label className="mt-6 flex cursor-pointer items-start gap-3 text-sm sm:items-center">
+          <Checkbox
+            checked={accepted}
+            onCheckedChange={(v) => setAccepted(v === true)}
+            className="size-6 rounded-md"
+          />
+          <span className="text-muted-foreground">
+            Eu aceito os{" "}
+            <Link to="/p/termos" className="font-bold text-foreground underline-offset-2 hover:underline">
+              termos e condições
+            </Link>{" "}
+            desta compra.
+          </span>
+        </label>
+        <motion.div whileTap={{ scale: 0.99 }} className="mt-4">
+          <Button
+            size="lg"
+            disabled={submitting || missingRequired || !accepted}
+            onClick={submit}
+            className="h-14 w-full rounded-2xl bg-white text-lg font-bold text-zinc-950 shadow-lg shadow-red-500/20 hover:bg-zinc-200"
+          >
+            {submitting ? (
+              <><Loader2 className="mr-2 size-5 animate-spin" /> Processando...</>
+            ) : (
+              <>Pagar {formatBRL(cart.subtotalCents)}</>
+            )}
+          </Button>
+        </motion.div>
+
+        {/* Resumo do pedido */}
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12 }}
+          className="mt-6 overflow-hidden rounded-3xl border bg-card"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b p-5 sm:px-6">
+            <h2 className="text-xl font-extrabold tracking-tight">Resumo do pedido</h2>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-bold text-red-500">
+              <Lock className="size-3.5" /> Pagamento seguro
+            </span>
+          </div>
+
+          <div className="p-5 sm:px-6">
+            {cart.items.map((item) => (
+              <div key={`${item.productId}-${item.variantId ?? "b"}`} className="py-4 first:pt-0 last:pb-0">
+                <div className="flex items-center gap-3">
+                  <div className="size-12 shrink-0 overflow-hidden rounded-xl bg-muted">
+                    {item.image ? (
+                      <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                        <ShoppingBag className="size-5" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold uppercase">{item.name}</p>
+                    <p className="text-sm text-muted-foreground">{formatBRL(item.unitPriceCents)}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      aria-label="Diminuir"
+                      onClick={() =>
+                        cart.setQuantity(item.productId, item.variantId, Math.max(item.minQty ?? 1, item.quantity - 1))
+                      }
+                      className="flex size-9 items-center justify-center rounded-full border transition-colors hover:bg-accent"
+                    >
+                      <Minus className="size-3.5" />
+                    </button>
+                    <span className="flex h-9 min-w-12 items-center justify-center rounded-full border px-2 text-sm font-bold">
+                      {item.quantity}
+                    </span>
+                    <button
+                      aria-label="Aumentar"
+                      onClick={() =>
+                        cart.setQuantity(
+                          item.productId,
+                          item.variantId,
+                          Math.min(item.maxQty && item.maxQty > 0 ? item.maxQty : 99, item.quantity + 1),
+                        )
+                      }
+                      className="flex size-9 items-center justify-center rounded-full border transition-colors hover:bg-accent"
+                    >
+                      <Plus className="size-3.5" />
+                    </button>
+                    <button
+                      aria-label="Remover"
+                      onClick={() => cart.remove(item.productId, item.variantId)}
+                      className="ml-1 flex size-9 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 text-red-500 transition-colors hover:bg-red-500/20"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                  <span className="text-lg font-bold">{formatBRL(item.unitPriceCents * item.quantity)}</span>
+                </div>
               </div>
+            ))}
+
+            <Separator className="my-4" />
+
+            {/* Cupom */}
+            <div className="flex flex-col gap-2.5 sm:flex-row">
+              <Input
+                placeholder="Digite seu cupom de desconto"
+                value={cart.coupon ?? ""}
+                readOnly
+                className="h-12 flex-1 rounded-2xl bg-muted/40 px-5 text-base"
+              />
+              <Button
+                variant="outline"
+                className="h-12 rounded-2xl border-border bg-card px-6 text-base font-bold"
+                onClick={() => {
+                  cart.setCoupon(null);
+                  toast.info("Cupom removido.");
+                }}
+              >
+                <Ticket className="mr-2 size-4.5" /> {cart.coupon ? "Remover" : "Cupom"}
+              </Button>
             </div>
 
             <Separator className="my-4" />
 
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
+            <div className="rounded-2xl bg-muted/40 p-4 text-sm">
+              <div className="flex justify-between py-0.5">
                 <span className="text-muted-foreground">Subtotal</span>
                 <span>{formatBRL(cart.subtotalCents)}</span>
               </div>
-              {cart.coupon && (
-                <div className="flex justify-between text-emerald-600">
-                  <span>Cupom {cart.coupon}</span>
-                  <span>desconto na confirmação</span>
-                </div>
-              )}
-              <Separator className="my-2" />
+              <div className="flex justify-between py-0.5">
+                <span className="text-muted-foreground">Descontos</span>
+                <span>{cart.coupon ? `Cupom ${cart.coupon}` : "R$ 0,00"}</span>
+              </div>
+              <Separator className="my-3" />
               <div className="flex justify-between text-base font-bold">
                 <span>Total</span>
                 <span>{formatBRL(cart.subtotalCents)}</span>
               </div>
             </div>
 
-            <Button
-              className="mt-6 w-full"
-              size="lg"
-              disabled={submitting || missingRequired}
-              onClick={submit}
-            >
-              {submitting ? (
-                <><Loader2 className="mr-2 size-4 animate-spin" /> Processando...</>
-              ) : (
-                <>Gerar pagamento PIX <ArrowRight className="ml-2 size-4" /></>
-              )}
-            </Button>
-            <p className="mt-3 text-center text-xs text-muted-foreground">
-              Você será redirecionado para o pagamento. O status é confirmado automaticamente.
+            <p className="mt-4 text-center text-xs text-muted-foreground">
+              O status do pagamento é confirmado automaticamente via PIX.
             </p>
           </div>
-        </div>
+        </motion.section>
       </div>
     </StoreLayout>
   );

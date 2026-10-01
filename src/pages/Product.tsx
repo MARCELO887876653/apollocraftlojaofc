@@ -7,17 +7,10 @@ import { StoreLayout } from "@/components/store/StoreLayout";
 import { useCart } from "@/lib/cart";
 import { formatBRL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { ProductCard } from "@/components/store/ProductCard";
-import { ShoppingBag, ShoppingCart, Check, Zap, ShieldCheck } from "lucide-react";
+import { ShoppingBag, ShoppingCart, Zap, Plus, Minus } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type Variant = {
   _id: string;
@@ -28,6 +21,14 @@ type Variant = {
   unlimitedStock: boolean;
   active: boolean;
 };
+
+function GemIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M6 3h12l4 6-10 12L2 9l4-6Zm2.4 2L6 8.4 12 15l6-6.6L15.6 5H8.4Z" />
+    </svg>
+  );
+}
 
 export default function ProductPage() {
   const { slug = "" } = useParams();
@@ -56,8 +57,6 @@ export default function ProductPage() {
     product ? { productId: product._id, categoryId: product.categoryId, limit: 4 } : "skip",
   ) as any[] | undefined;
 
-  const benefits = product?.benefits ?? [];
-
   const selectedVariant = useMemo(
     () => variants.find((v) => v._id === variantId) ?? null,
     [variants, variantId],
@@ -81,18 +80,18 @@ export default function ProductPage() {
   const outOfStock = !product || (stock !== Infinity && stock < 1);
   const minQty = product?.minQty ?? 1;
   const maxQty = Math.min(product?.maxQty ?? 99, stock === Infinity ? 99 : stock);
+  const deliveryType = product?.delivery?.type;
+  const instantDelivery =
+    deliveryType && deliveryType !== "none" && deliveryType !== "manual";
 
   if (data === undefined) {
     return (
       <StoreLayout>
-        <div className="mx-auto w-full max-w-7xl px-4 py-16">
-          <div className="grid gap-8 lg:grid-cols-2">
-            <div className="aspect-video animate-pulse rounded-xl bg-muted" />
-            <div className="space-y-4">
-              <div className="h-8 w-2/3 animate-pulse rounded bg-muted" />
-              <div className="h-6 w-1/3 animate-pulse rounded bg-muted" />
-              <div className="h-24 w-full animate-pulse rounded bg-muted" />
-            </div>
+        <div className="mx-auto w-full max-w-3xl px-4 py-12">
+          <div className="aspect-video animate-pulse rounded-2xl bg-muted/60" />
+          <div className="mt-6 space-y-3">
+            <div className="h-9 w-2/3 animate-pulse rounded bg-muted/60" />
+            <div className="h-6 w-1/3 animate-pulse rounded bg-muted/60" />
           </div>
         </div>
       </StoreLayout>
@@ -128,154 +127,143 @@ export default function ProductPage() {
 
   return (
     <StoreLayout>
-      <div className="mx-auto w-full max-w-7xl px-4 py-10">
-        <nav className="mb-6 text-sm text-muted-foreground">
-          <Link to="/loja" className="hover:text-foreground">Catálogo</Link>
-          {data.category && (
-            <>
-              {" / "}
-              <Link to={`/loja?categoria=${data.category.slug}`} className="hover:text-foreground">
-                {data.category.name}
-              </Link>
-            </>
-          )}
-          {" / "}
-          <span className="text-foreground">{product.name}</span>
-        </nav>
-
-        <div className="grid gap-10 lg:grid-cols-2">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-          >
-            <div className="overflow-hidden rounded-2xl border border-red-500/25 bg-muted neon-glow">
-              {mainImage || product.image ? (
-                <motion.img
-                  key={mainImage ?? product.image}
-                  initial={{ opacity: 0, scale: 1.04 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.35, ease: "easeOut" }}
-                  src={mainImage ?? product.image}
-                  alt={product.name}
-                  loading="eager"
-                  decoding="async"
-                  className="aspect-square w-full object-cover"
-                />
-              ) : (
-                <div className="flex aspect-square items-center justify-center text-muted-foreground">
-                  <ShoppingBag className="size-14" />
-                </div>
-              )}
+      <div className="mx-auto w-full max-w-3xl px-4 py-8">
+        {/* Card principal do produto — estilo CentralCart */}
+        <motion.div
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45 }}
+          className="rounded-3xl border bg-card p-4 sm:p-6"
+        >
+          <div className="overflow-hidden rounded-2xl border bg-muted">
+            {mainImage || product.image ? (
+              <motion.img
+                key={mainImage ?? product.image}
+                initial={{ opacity: 0, scale: 1.03 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+                src={mainImage ?? product.image}
+                alt={product.name}
+                loading="eager"
+                decoding="async"
+                className="aspect-video w-full object-cover"
+              />
+            ) : (
+              <div className="flex aspect-video items-center justify-center text-muted-foreground">
+                <ShoppingBag className="size-14" />
+              </div>
+            )}
+          </div>
+          {product.images?.length > 0 && (
+            <div className="mt-3 grid grid-cols-5 gap-2">
+              {[product.image, ...product.images].filter(Boolean).slice(0, 5).map((img: string, i: number) => {
+                const selected = (mainImage ?? product.image) === img;
+                return (
+                  <motion.button
+                    key={i}
+                    whileTap={{ scale: 0.95 }}
+                    className={`overflow-hidden rounded-lg border transition ${
+                      selected ? "border-primary ring-2 ring-primary/40" : "opacity-70 hover:opacity-100"
+                    }`}
+                    onClick={() => setMainImage(img)}
+                  >
+                    <img src={img} alt="" loading="lazy" decoding="async" className="aspect-square w-full object-cover" />
+                  </motion.button>
+                );
+              })}
             </div>
-            {product.images?.length > 0 && (
-              <div className="mt-3 grid grid-cols-5 gap-2">
-                {[product.image, ...product.images].filter(Boolean).slice(0, 5).map((img: string, i: number) => {
-                  const selected = (mainImage ?? product.image) === img;
+          )}
+
+          <h1 className="mt-5 text-2xl font-extrabold uppercase tracking-tight sm:text-3xl">
+            {product.name}
+          </h1>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {compareAt && compareAt > price && (
+              <>
+                <span className="text-base text-muted-foreground line-through">{formatBRL(compareAt)}</span>
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1 text-sm font-bold">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="size-3.5">
+                    <path d="m3 7 6 6 4-4 8 8" />
+                    <path d="M21 11v6h-6" />
+                  </svg>
+                  -{discount} % OFF
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="text-3xl font-extrabold tracking-tight">{formatBRL(price)}</span>
+            <span className="rounded-lg bg-muted px-2.5 py-1.5 text-xs font-semibold text-muted-foreground">
+              {stock === Infinity || product.unlimitedStock
+                ? "100+ em estoque"
+                : `${Math.max(stock, 0)} em estoque`}
+            </span>
+            {instantDelivery && (
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-zinc-950">
+                <Zap className="size-3.5" /> Entrega automática
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-sm text-muted-foreground">À vista no Pix</p>
+
+          {variants.length > 0 && (
+            <div className="mt-5">
+              <p className="mb-2 text-sm font-semibold">Escolha uma opção</p>
+              <div className="flex flex-wrap gap-2">
+                {variants.map((v) => {
+                  const vOut = !v.unlimitedStock && v.stock <= 0;
                   return (
-                    <motion.button
-                      key={i}
-                      whileTap={{ scale: 0.95 }}
-                      className={`overflow-hidden rounded-lg border transition ${
-                        selected ? "border-primary ring-2 ring-primary/40" : "opacity-70 hover:opacity-100"
+                    <button
+                      key={v._id}
+                      disabled={vOut}
+                      onClick={() => {
+                        setVariantId(v._id === variantId ? "" : v._id);
+                        setQty(minQty);
+                      }}
+                      className={`rounded-xl border px-4 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                        variantId === v._id
+                          ? "border-primary bg-primary/5 ring-1 ring-primary"
+                          : "hover:border-primary/40"
                       }`}
-                      onClick={() => setMainImage(img)}
                     >
-                      <img src={img} alt="" loading="lazy" decoding="async" className="aspect-square w-full object-cover" />
-                    </motion.button>
+                      <span className="font-medium">{v.name}</span>
+                      <span className="block text-xs text-muted-foreground">{formatBRL(v.priceCents)}</span>
+                    </button>
                   );
                 })}
               </div>
-            )}
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              {data.category && (
-                <Badge variant="secondary">{data.category.name}</Badge>
-              )}
-              {product.popular && <Badge variant="outline">Mais vendido</Badge>}
-              {discount > 0 && <Badge className="bg-red-600 hover:bg-red-600">-{discount}%</Badge>}
             </div>
-            <h1 className="mt-3 text-3xl font-extrabold tracking-tight">{product.name}</h1>
-            {product.shortDescription && (
-              <p className="mt-2 text-muted-foreground">{product.shortDescription}</p>
-            )}
+          )}
 
-            <div className="mt-5 flex flex-wrap items-end gap-3">
-              <span className="text-4xl font-extrabold text-white neon-text">{formatBRL(price)}</span>
-              {discount > 0 && (
-                <span className="pb-1 text-lg text-muted-foreground line-through">{formatBRL(compareAt!)}</span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">À vista no Pix</p>
-
-            <p className="mt-2 text-sm">
-              {stock === Infinity ? (
-                <span className="text-emerald-600">Estoque sempre disponível</span>
-              ) : stock > 0 ? (
-                <span className="text-emerald-600">{stock} em estoque</span>
-              ) : (
-                <span className="text-red-600">Esgotado</span>
-              )}
-            </p>
-
-            {variants.length > 0 && (
-              <div className="mt-6">
-                <p className="mb-2 text-sm font-semibold">Escolha uma opção</p>
-                <div className="flex flex-wrap gap-2">
-                  {variants.map((v) => {
-                    const vOut = !v.unlimitedStock && v.stock <= 0;
-                    return (
-                      <button
-                        key={v._id}
-                        disabled={vOut}
-                        onClick={() => {
-                          setVariantId(v._id === variantId ? "" : v._id);
-                          setQty(minQty);
-                        }}
-                        className={`rounded-lg border px-4 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                          variantId === v._id
-                            ? "border-primary bg-primary/5 ring-1 ring-primary"
-                            : "hover:border-primary/40"
-                        }`}
-                      >
-                        <span className="font-medium">{v.name}</span>
-                        <span className="block text-xs text-muted-foreground">{formatBRL(v.priceCents)}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-6 flex items-center gap-3">
-              <div className="flex items-center rounded-lg border">
-                <Button variant="ghost" size="icon" onClick={() => setQty((q) => Math.max(minQty, q - 1))}>−</Button>
-                <Input
-                  type="number"
-                  min={minQty}
-                  max={maxQty}
-                  value={qty}
-                  onChange={(e) => {
-                    const n = parseInt(e.target.value, 10) || minQty;
-                    setQty(Math.min(Math.max(n, minQty), maxQty));
-                  }}
-                  className="w-14 border-0 text-center [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
-                />
-                <Button variant="ghost" size="icon" onClick={() => setQty((q) => Math.min(maxQty, q + 1))}>+</Button>
-              </div>
-              <span className="text-sm text-muted-foreground">
-                {maxQty > 0 ? `máx. ${maxQty}` : ""}
+          <div className="mt-6 rounded-2xl border p-4">
+            {/* Contador de quantidade */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setQty((q) => Math.max(minQty, q - 1))}
+                aria-label="Diminuir quantidade"
+                className="flex size-10 items-center justify-center rounded-full border text-lg transition-colors hover:bg-accent"
+              >
+                <Minus className="size-4" />
+              </button>
+              <span className="flex h-10 min-w-14 items-center justify-center rounded-full border px-3 text-sm font-bold">
+                {qty}
+              </span>
+              <button
+                onClick={() => setQty((q) => Math.min(maxQty, q + 1))}
+                aria-label="Aumentar quantidade"
+                className="flex size-10 items-center justify-center rounded-full border text-lg transition-colors hover:bg-accent"
+              >
+                <Plus className="size-4" />
+              </button>
+              <span className="ml-1 text-sm text-muted-foreground">
+                {maxQty > 0 && maxQty !== Infinity ? `máx. ${maxQty}` : ""}
               </span>
             </div>
 
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-              <motion.div whileTap={{ scale: 0.98 }} className="flex-1">
+            <div className="mt-4 space-y-2.5">
+              <motion.div whileTap={{ scale: 0.99 }}>
                 <Button
                   size="lg"
                   disabled={outOfStock}
@@ -283,78 +271,103 @@ export default function ProductPage() {
                     addToCart();
                     navigate("/checkout");
                   }}
-                  className="neon-glow-strong h-12 w-full rounded-full bg-white text-sm font-bold text-zinc-950 shadow-lg shadow-red-500/20 hover:bg-zinc-200"
+                  className="h-12 w-full rounded-full bg-white text-base font-bold text-zinc-950 shadow-lg shadow-red-500/20 hover:bg-zinc-200"
                 >
-                  <ShoppingCart className="mr-2 size-4" /> Comprar agora
+                  <ShoppingCart className="mr-2 size-5" /> Comprar agora
                 </Button>
               </motion.div>
-              <motion.div whileTap={{ scale: 0.98 }} className="flex-1">
+              <motion.div whileTap={{ scale: 0.99 }}>
                 <Button
                   size="lg"
                   variant="outline"
-                  className="h-12 w-full rounded-xl border-border bg-card/60 font-semibold backdrop-blur"
+                  className="h-12 w-full rounded-full border-border bg-card font-semibold"
                   disabled={outOfStock}
                   onClick={addToCart}
                 >
-                  <Zap className="mr-2 size-4" /> Adicionar ao carrinho
+                  <Plus className="mr-2 size-5" /> Adicionar ao carrinho
                 </Button>
               </motion.div>
             </div>
+          </div>
 
-            {benefits.length > 0 && (
-              <ul className="mt-6 space-y-2">
-                {benefits.map((b: string, i: number) => (
-                  <li key={i} className="flex items-center gap-2 text-sm">
-                    <Check className="size-4 text-emerald-600" /> {b}
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <div className="mt-6 flex items-center gap-4 rounded-lg border bg-muted/50 p-3 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1.5"><Zap className="size-3.5 text-primary" /> Entrega automática</span>
-              <span className="flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-emerald-600" /> Pagamento seguro</span>
+          {/* Vantagens */}
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="flex items-center gap-3 rounded-2xl border p-3.5">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500">
+                <GemIcon className="size-4.5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-bold">Compra segura</p>
+                <p className="truncate text-xs text-muted-foreground">Dados criptografados</p>
+              </div>
             </div>
-          </motion.div>
+            <div className="flex items-center gap-3 rounded-2xl border p-3.5">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500">
+                <Zap className="size-4.5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-bold">Envio imediato</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {instantDelivery ? "Entrega automática" : "Entrega rápida"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {(product.benefits ?? []).length > 0 && (
+            <ul className="mt-4 space-y-2">
+              {(product.benefits as string[]).map((b, i) => (
+                <li key={i} className="flex items-center gap-2 text-sm">
+                  <GemIcon className="size-3.5 text-red-500" /> {b}
+                </li>
+              ))}
+            </ul>
+          )}
+        </motion.div>
+
+        {/* Descrição */}
+        {product.description && (
+          <motion.section
+            initial={{ opacity: 0, y: 18 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="mt-4 rounded-3xl border bg-card p-5 sm:p-6"
+          >
+            <h2 className="text-xl font-extrabold tracking-tight">Descrição</h2>
+            <div className="mt-3 whitespace-pre-wrap text-muted-foreground">{product.description}</div>
+          </motion.section>
+        )}
+
+        {/* FAQ de pagamento/entrega */}
+        <div className="mt-4 space-y-3">
+          {[
+            {
+              t: "Formas de pagamento",
+              d: "Aceitamos pagamentos via PIX com confirmação automática pelo Mercado Pago.",
+            },
+            {
+              t: "Como funciona a entrega?",
+              d: "Após a confirmação do pagamento, o produto é entregue automaticamente conforme a configuração de cada item (comando no servidor, mensagem, código ou API).",
+            },
+          ].map((f) => (
+            <div key={f.t} className="rounded-2xl border bg-card p-5">
+              <p className="font-bold">{f.t}</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">{f.d}</p>
+            </div>
+          ))}
         </div>
 
-        {product.description && (
-          <Separator className="my-10" />
-        )}
-
-        {product.description && (
-          <section className="max-w-3xl">
-            <h2 className="mb-3 text-xl font-bold">Sobre o produto</h2>
-            <div className="whitespace-pre-wrap text-muted-foreground">{product.description}</div>
-          </section>
-        )}
-
+        {/* Relacionados */}
         {related && related.length > 0 && (
-          <section className="mt-14">
-            <h2 className="mb-6 text-2xl font-bold tracking-tight">Produtos relacionados</h2>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <section className="mt-10">
+            <h2 className="mb-5 text-2xl font-extrabold tracking-tight">Produtos relacionados</h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {related.map((p) => (
                 <ProductCard key={p._id} product={p} />
               ))}
             </div>
           </section>
         )}
-
-        <Accordion type="single" collapsible className="mt-14 max-w-3xl">
-          <AccordionItem value="pagamento">
-            <AccordionTrigger>Formas de pagamento</AccordionTrigger>
-            <AccordionContent className="text-muted-foreground">
-              Aceitamos pagamentos via PIX com confirmação automática pelo Mercado Pago.
-            </AccordionContent>
-          </AccordionItem>
-          <AccordionItem value="entrega">
-            <AccordionTrigger>Como funciona a entrega?</AccordionTrigger>
-            <AccordionContent className="text-muted-foreground">
-              Após a confirmação do pagamento, o produto é entregue automaticamente conforme a
-              configuração de cada item (comando no servidor, mensagem, código ou API).
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
       </div>
     </StoreLayout>
   );

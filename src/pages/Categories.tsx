@@ -26,7 +26,7 @@ export default function CategoriesPage() {
           animate={{ opacity: 1, y: 0 }}
           className="neon-border mb-4 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-1.5 text-sm font-semibold text-muted-foreground"
         >
-          <List className="size-4 text-emerald-500" /> Navegue por categoria
+          <List className="size-4 text-red-500" /> Navegue por categoria
         </motion.span>
         <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
           Categorias da loja
@@ -57,7 +57,7 @@ export default function CategoriesPage() {
               <motion.div key={c._id} variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { duration: 0.45 } } }} whileHover={{ y: -4 }}>
                 <Link
                   to={`/categoria/${c.slug}`}
-                  className="group flex h-full items-center gap-4 rounded-2xl border bg-card p-4 transition-all duration-300 hover:border-emerald-500/40 hover:shadow-[0_0_28px_-8px_rgb(16_185_129/0.4)]"
+                  className="group flex h-full items-center gap-4 rounded-2xl border bg-card p-4 transition-all duration-300 hover:border-red-500/40 hover:shadow-[0_0_28px_-8px_rgb(225_29_29/0.4)]"
                 >
                   <div
                     className="relative size-20 shrink-0 overflow-hidden rounded-xl transition-transform duration-300 group-hover:scale-105"
@@ -79,7 +79,7 @@ export default function CategoriesPage() {
                     <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">
                       {c.description ?? `Veja os itens disponíveis de ${c.name}.`}
                     </p>
-                    <span className="mt-2 inline-flex items-center gap-1.5 text-sm font-bold text-emerald-400 transition-colors group-hover:text-emerald-300">
+                    <span className="mt-2 inline-flex items-center gap-1.5 text-sm font-bold text-red-400 transition-colors group-hover:text-red-300">
                       Ver produtos <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
                     </span>
                   </div>

@@ -36,10 +36,10 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-40px" }}
       transition={{ duration: 0.4, delay: Math.min(index * 0.06, 0.3), ease: [0.21, 0.47, 0.32, 0.98] }}
-      className="group relative overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-emerald-500/40 hover:shadow-[0_0_30px_-6px_rgb(16_185_129/0.35)]"
+      className="group relative overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-red-500/40 hover:shadow-[0_0_30px_-6px_rgb(225_29_29/0.4)]"
     >
       {/* brilho neon no hover */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-500/70 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-red-500/70 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
 
       {/* Layout horizontal compacto: thumb pequeno à esquerda + info */}
       <div className="flex gap-3 p-3">
@@ -61,7 +61,7 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
             </div>
           )}
           {discount > 0 && (
-            <span className="absolute left-1 top-1 inline-flex items-center gap-0.5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-extrabold text-emerald-950 shadow-[0_0_14px_-2px_rgb(16_185_129/0.7)]">
+            <span className="absolute left-1 top-1 inline-flex items-center gap-0.5 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-extrabold text-white shadow-[0_0_14px_-2px_rgb(225_29_29/0.7)]">
               <TrendingDown className="size-2.5" /> -{discount}%
             </span>
           )}
@@ -74,13 +74,13 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
 
         <div className="flex min-w-0 flex-1 flex-col">
           {category && (
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500/90">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-red-500/90">
               {category.name}
             </span>
           )}
           <Link
             to={`/produto/${product.slug}`}
-            className="line-clamp-1 text-base font-extrabold tracking-tight transition-colors hover:text-emerald-400"
+            className="line-clamp-1 text-base font-extrabold tracking-tight transition-colors hover:text-red-400"
           >
             {product.name}
           </Link>

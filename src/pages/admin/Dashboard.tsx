@@ -139,7 +139,7 @@ export default function AdminDashboard() {
           label="Total em vendas"
           value={formatBRL(stats.revenueTotal)}
           footer="Vendas de todo o período"
-          tileClass="bg-emerald-500/10 text-emerald-400"
+          tileClass="bg-red-500/10 text-red-400"
         />
         <KpiCard
           icon={Wallet}

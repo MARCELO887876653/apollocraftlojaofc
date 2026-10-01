@@ -74,8 +74,8 @@ export default function AdminMore() {
           {store?.logoUrl ? (
             <img src={store.logoUrl} alt="" className="size-12 rounded-xl object-cover" />
           ) : (
-            <span className="flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600">
-              <Store className="size-6 text-emerald-950" />
+            <span className="flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-red-400 to-red-600">
+              <Store className="size-6 text-red-950" />
             </span>
           )}
           <p className="min-w-0 flex-1 truncate text-[17px] font-bold">
@@ -95,7 +95,7 @@ export default function AdminMore() {
           </span>
           <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all"
+              className="h-full rounded-full bg-gradient-to-r from-red-500 to-rose-400 transition-all"
               style={{ width: `${progress}%` }}
             />
           </div>

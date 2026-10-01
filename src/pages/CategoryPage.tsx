@@ -3,10 +3,10 @@ import { useQuery } from "convex/react";
 import { motion } from "framer-motion";
 import { api } from "@/convex/_generated/api";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, Package } from "lucide-react";
+import { ArrowLeft, Package, ShoppingCart } from "lucide-react";
 import { StoreLayout } from "@/components/store/StoreLayout";
-import { ProductCard } from "@/components/store/ProductCard";
-import { Button } from "@/components/ui/button";
+import { formatBRL } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 type Category = {
   _id: string;
@@ -18,6 +18,122 @@ type Category = {
   description?: string;
   parentId?: string;
 };
+
+type Product = {
+  _id: string;
+  slug: string;
+  name: string;
+  image?: string;
+  priceCents: number;
+  compareAtPriceCents?: number;
+  stock: number;
+  unlimitedStock: boolean;
+};
+
+/** Card vertical estilo CentralCart: imagem grande, preço, desconto e "Comprar agora". */
+function CategoryProductCard({ product, index }: { product: Product; index: number }) {
+  const outOfStock = !product.unlimitedStock && product.stock <= 0;
+  const discount =
+    product.compareAtPriceCents && product.compareAtPriceCents > product.priceCents
+      ? Math.round((1 - product.priceCents / product.compareAtPriceCents) * 100)
+      : 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, delay: Math.min(index * 0.05, 0.3) }}
+      className="group flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-red-500/40 hover:shadow-[0_0_30px_-6px_rgb(225_29_29/0.4)]"
+    >
+      <Link
+        to={`/produto/${product.slug}`}
+        className="relative block aspect-square w-full overflow-hidden bg-muted"
+      >
+        {product.image ? (
+          <img
+            src={product.image}
+            alt={product.name}
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-muted to-card">
+            <Package className="size-10 opacity-30" />
+          </div>
+        )}
+        {outOfStock && (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-sm font-bold backdrop-blur-sm">
+            Esgotado
+          </div>
+        )}
+      </Link>
+
+      <div className="flex flex-1 flex-col p-4">
+        <Link
+          to={`/produto/${product.slug}`}
+          className="line-clamp-1 text-base font-extrabold uppercase tracking-tight transition-colors hover:text-red-400"
+        >
+          {product.name}
+        </Link>
+
+        <div className="mt-2 flex items-center gap-2">
+          {discount > 0 ? (
+            <>
+              <span className="text-sm text-muted-foreground line-through">
+                {formatBRL(product.compareAtPriceCents!)}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs font-bold text-foreground">
+                <TrendingDownIcon /> -{discount}%
+              </span>
+              <span className="ml-auto flex size-8 items-center justify-center rounded-lg bg-red-500/15 text-red-500">
+                <GemIcon />
+              </span>
+            </>
+          ) : (
+            <span className="ml-auto flex size-8 items-center justify-center rounded-lg bg-red-500/15 text-red-500">
+              <GemIcon />
+            </span>
+          )}
+        </div>
+
+        <p className="mt-1 text-xl font-extrabold tracking-tight">{formatBRL(product.priceCents)}</p>
+        <p className="text-sm text-muted-foreground">À vista no Pix</p>
+
+        <div className="mt-auto pt-4">
+          <Link
+            to={`/produto/${product.slug}`}
+            aria-disabled={outOfStock}
+            onClick={(e) => outOfStock && e.preventDefault()}
+            className={cn(
+              "flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-white text-sm font-bold text-zinc-950 transition-colors hover:bg-zinc-200",
+              outOfStock && "pointer-events-none opacity-50",
+            )}
+          >
+            <ShoppingCart className="size-4.5" /> Comprar agora
+          </Link>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function TrendingDownIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="size-3">
+      <path d="m3 7 6 6 4-4 8 8" />
+      <path d="M21 11v6h-6" />
+    </svg>
+  );
+}
+
+function GemIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="size-4">
+      <path d="M6 3h12l4 6-10 12L2 9l4-6Zm2.4 2L6 8.4 12 15l6-6.6L15.6 5H8.4Z" />
+    </svg>
+  );
+}
 
 export default function CategoryPage() {
   const { slug = "" } = useParams();
@@ -36,19 +152,7 @@ export default function CategoryPage() {
 
   return (
     <StoreLayout>
-      <div className="mx-auto w-full max-w-7xl px-4 py-10">
-        <nav className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-          <Link to="/categorias" className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground">
-            <ArrowLeft className="size-4" /> Categorias
-          </Link>
-          {category && (
-            <>
-              <span>/</span>
-              <span className="font-medium text-foreground">{category.name}</span>
-            </>
-          )}
-        </nav>
-
+      <div className="mx-auto w-full max-w-7xl px-4 py-8">
         {!categories ? null : !category ? (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed p-16 text-center text-muted-foreground">
             <Package className="size-10 opacity-40" />
@@ -56,55 +160,44 @@ export default function CategoryPage() {
           </div>
         ) : (
           <>
-            {/* Cabeçalho da categoria */}
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4 }}
-              className="relative overflow-hidden rounded-2xl border bg-card"
-            >
-              {category.image && (
-                <>
-                  <img src={category.image} alt="" className="absolute inset-0 h-full w-full object-cover opacity-25" />
-                  <div className="absolute inset-0 bg-gradient-to-r from-background via-background/85 to-background/40" />
-                </>
-              )}
-              <div className="relative flex items-center gap-4 p-6">
-                <div
-                  className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl text-3xl"
-                  style={{ backgroundColor: category.color ? `${category.color}22` : undefined }}
-                >
-                  {category.image ? (
-                    <img src={category.image} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    category.icon ?? "📦"
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <h1 className="text-2xl font-extrabold uppercase tracking-tight sm:text-3xl">{category.name}</h1>
-                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                    {category.description ?? `Produtos de ${category.name}`}
-                  </p>
-                </div>
-              </div>
-            </motion.div>
+            {/* Cabeçalho: botão voltar + título gigante */}
+            <div className="mb-7 flex items-center gap-4">
+              <Link
+                to="/categorias"
+                aria-label="Voltar para categorias"
+                className="flex size-12 shrink-0 items-center justify-center rounded-2xl border bg-card text-foreground transition-colors hover:bg-accent"
+              >
+                <ArrowLeft className="size-5" />
+              </Link>
+              <h1 className="text-3xl font-extrabold uppercase tracking-tight sm:text-5xl">
+                {category.name}
+              </h1>
+            </div>
 
             {/* Subcategorias (chips) */}
             {subs.length > 0 && (
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant={selectedSlug === category.slug ? "default" : "outline"}
+              <div className="mb-6 flex flex-wrap gap-2">
+                <button
                   onClick={() => setSubSlug(null)}
+                  className={cn(
+                    "rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors",
+                    selectedSlug === category.slug
+                      ? "border-transparent bg-red-500/15 text-red-400"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
                 >
                   Todos
-                </Button>
+                </button>
                 {subs.map((s) => (
-                  <Button
+                  <button
                     key={s._id}
-                    size="sm"
-                    variant={selectedSlug === s.slug ? "default" : "outline"}
                     onClick={() => setSubSlug(s.slug)}
+                    className={cn(
+                      "rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors",
+                      selectedSlug === s.slug
+                        ? "border-transparent bg-red-500/15 text-red-400"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )}
                   >
                     {s.image ? (
                       <img src={s.image} alt="" className="mr-1.5 inline size-4 rounded-full object-cover" />
@@ -112,34 +205,29 @@ export default function CategoryPage() {
                       <span className="mr-1">{s.icon}</span>
                     ) : null}
                     {s.name}
-                  </Button>
+                  </button>
                 ))}
               </div>
             )}
 
             {/* Produtos */}
             {products === undefined ? (
-              <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-32 animate-pulse rounded-2xl bg-muted" />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="aspect-[3/4] animate-pulse rounded-2xl bg-muted/60" />
                 ))}
               </div>
             ) : products.length === 0 ? (
-              <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-dashed p-16 text-center text-muted-foreground">
+              <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed p-16 text-center text-muted-foreground">
                 <Package className="size-10 opacity-40" />
                 Nenhum produto nesta categoria ainda.
               </div>
             ) : (
-              <motion.div
-                variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
-                initial="hidden"
-                animate="show"
-                className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
-              >
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {products.map((p, i) => (
-                  <ProductCard key={p._id} product={p} index={i} />
+                  <CategoryProductCard key={p._id} product={p} index={i} />
                 ))}
-              </motion.div>
+              </div>
             )}
           </>
         )}

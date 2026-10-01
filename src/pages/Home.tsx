@@ -111,7 +111,7 @@ function Hero() {
           {hero?.title ?? (
             <>
               Domine o jogo com os{" "}
-              <span className="neon-text bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">
+              <span className="neon-text bg-gradient-to-r from-red-400 to-rose-300 bg-clip-text text-transparent">
                 kits e VIPs
               </span>{" "}
               da nossa loja!
@@ -125,7 +125,7 @@ function Hero() {
           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}>
             <Link
               to="/loja"
-              className="neon-glow-strong inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-full bg-white px-7 text-sm font-bold text-zinc-950 shadow-lg shadow-emerald-500/25 transition-colors hover:bg-zinc-200"
+              className="neon-glow-strong inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-full bg-white px-7 text-sm font-bold text-zinc-950 shadow-lg shadow-red-500/25 transition-colors hover:bg-zinc-200"
             >
               <ShoppingBag className="size-4" /> Conferir ofertas
             </Link>
@@ -207,14 +207,14 @@ function Categories() {
           viewport={{ once: true }}
           className="mb-5 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm font-semibold text-muted-foreground"
         >
-          <List className="size-4" /> Categorias populares
+          <List className="size-4 text-red-400" /> Categorias populares
         </motion.span>
         <motion.div variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: "-60px" }} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {categories.slice(0, 6).map((c) => (
             <motion.div key={c._id} variants={fadeUp} whileHover={{ y: -4 }}>
               <Link
                 to={`/categoria/${c.slug}`}
-                className="group flex items-center gap-4 rounded-3xl border bg-card p-4 transition-all duration-300 hover:border-emerald-500/40 hover:shadow-[0_0_28px_-8px_rgb(16_185_129/0.4)]"
+                className="group flex items-center gap-4 rounded-3xl border bg-card p-4 transition-all duration-300 hover:border-red-500/40 hover:shadow-[0_0_28px_-8px_rgb(225_29_29/0.45)]"
               >
                 <div
                   className="relative size-28 shrink-0 overflow-hidden rounded-2xl transition-transform duration-300 group-hover:scale-105"
@@ -436,7 +436,7 @@ function FaqSection() {
           viewport={{ once: true }}
           className="inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm font-semibold text-muted-foreground"
         >
-          <HelpCircle className="size-4 text-emerald-400" /> FAQ
+          <HelpCircle className="size-4 text-red-400" /> FAQ
         </motion.span>
         <motion.h2
           initial={{ opacity: 0, y: 16 }}

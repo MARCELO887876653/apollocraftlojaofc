@@ -95,7 +95,7 @@ function ThemeTab() {
             <Input value={form.font} onChange={(e) => set("font", e.target.value)} />
           </div>
           <p className="text-xs text-muted-foreground">
-            A ApolloCraft usa tema escuro permanente — personalize as cores acima à vontade.
+            A RubyCraft usa tema escuro permanente — personalize as cores acima à vontade.
           </p>
         </CardContent>
       </Card>

@@ -149,7 +149,7 @@ export default function ProductPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: "easeOut" }}
           >
-            <div className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-muted neon-glow">
+            <div className="overflow-hidden rounded-2xl border border-red-500/25 bg-muted neon-glow">
               {mainImage || product.image ? (
                 <motion.img
                   key={mainImage ?? product.image}
@@ -283,7 +283,7 @@ export default function ProductPage() {
                     addToCart();
                     navigate("/checkout");
                   }}
-                  className="neon-glow-strong h-12 w-full rounded-full bg-white text-sm font-bold text-zinc-950 shadow-lg shadow-emerald-500/20 hover:bg-zinc-200"
+                  className="neon-glow-strong h-12 w-full rounded-full bg-white text-sm font-bold text-zinc-950 shadow-lg shadow-red-500/20 hover:bg-zinc-200"
                 >
                   <ShoppingCart className="mr-2 size-4" /> Comprar agora
                 </Button>

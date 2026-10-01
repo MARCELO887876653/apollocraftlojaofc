@@ -1,6 +1,7 @@
 import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { internal } from "./_generated/api";
 import { requireAdmin, logAudit } from "./lib/admin";
 import {
   checkRateLimit, generateOrderNumber, generateToken, getSetting,
@@ -38,18 +39,16 @@ export const create = mutation({
 
     if (!items.length) throw new Error("Carrinho vazio");
 
-    // valida campos de checkout conforme configuração do painel
-    const fieldRules: Record<string, boolean> = {};
-    for (const f of store?.checkoutFields ?? []) fieldRules[f.key] = f.enabled;
+    // valida campos de checkout conforme configuração do painel.
+    // Campos desativados NÃO são rejeitados: apenas são ignorados (o frontend
+    // pré-preenche nome/e-mail/discord da conta logada, e o e-mail é sempre
+    // necessário para recibo e consulta de pedidos).
     const label: Record<string, string> = {
       name: "Nome", email: "E-mail", discord: "Discord",
       minecraftNick: "Nickname do Minecraft", phone: "Telefone", uuid: "UUID",
     };
     for (const f of store?.checkoutFields ?? []) {
-      if (!f.enabled) {
-        if ((customer as any)[f.key]) throw new Error(`Campo ${label[f.key]} não deve ser enviado`);
-        continue;
-      }
+      if (!f.enabled) continue;
       const value = (customer as any)[f.key];
       if (f.required && f.key === "email" && !value) continue; // validado abaixo (com fallback da conta)
       if (f.required && (!value || String(value).trim() === ""))
@@ -175,6 +174,12 @@ export const create = mutation({
     const total = Math.max(0, subtotal - discount);
     const now = Date.now();
     const number = await generateOrderNumber(ctx);
+    // Normaliza strings vazias para undefined (evita "" salvo como se fosse dado real)
+    for (const k of ["name", "discord", "minecraftNick", "phone", "uuid"] as const) {
+      const v = (customer as any)[k];
+      if (typeof v === "string" && v.trim() === "") (customer as any)[k] = undefined;
+      else if (typeof v === "string") (customer as any)[k] = v.trim();
+    }
 
     // cliente
     let customerId: any;
@@ -447,14 +452,37 @@ export const adminUpdateStatus = mutation({
     const order = await ctx.db.get(id);
     if (!order) throw new Error("Pedido não encontrado");
     const now = Date.now();
-    const patch: any = {
+
+    // Transição para "paid": idempotente, dispara entrega e webhooks como no gateway
+    if (paymentStatus === "paid" && order.paymentStatus !== "paid") {
+      await ctx.db.patch(id, {
+        paymentStatus: "paid",
+        paidAt: now,
+        updatedAt: now,
+        statusHistory: [
+          ...order.statusHistory,
+          { status: "paid", at: now, note: note ?? `Pagamento confirmado por ${admin.name}` },
+        ],
+      });
+      await ctx.scheduler.runAfter(0, internal.deliveriesQueue.processOrder, { orderId: id });
+      await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
+        event: "order.paid",
+        payload: {
+          orderNumber: order.number,
+          total: order.totalCents / 100,
+          customerEmail: order.customerEmail,
+          customerName: order.customerName,
+          items: order.items.map((i: any) => ({ name: i.name, variant: i.variantName, quantity: i.quantity })),
+        },
+      });
+      await logAudit(ctx, admin, "order.status_update", "order", id, { paymentStatus });
+      return;
+    }
+
+    await ctx.db.patch(id, {
       paymentStatus,
       updatedAt: now,
-    };
-    if (paymentStatus === "paid" && order.paymentStatus !== "paid") {
-      patch.paidAt = now;
-    }
-    await ctx.db.patch(id, patch);
+    });
     await ctx.db.patch(id, {
       statusHistory: [
         ...order.statusHistory,

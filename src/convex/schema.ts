@@ -1,6 +1,13 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import {
+  apiKeysV1,
+  deliveryCommands,
+  deliveryAttempts,
+  addonServers,
+  apiLogs,
+} from "./lib/apiSchema";
 
 // default user roles. can add / remove based on the project as needed
 export const ROLES = {
@@ -52,6 +59,30 @@ const deliveryConfig = v.object({
   message: v.optional(v.string()),
   codes: v.optional(v.array(v.string())),
   showToCustomer: v.boolean(),
+  // ─── API v1 (addons) ───
+  deliveryV1: v.optional(
+    v.object({
+      enabled: v.boolean(),
+      actions: v.array(
+        v.object({
+          addonId: v.string(),
+          action: v.string(),
+          command: v.optional(v.string()),
+          payload: v.optional(v.any()),
+          serverId: v.optional(v.string()),
+          offlineExecute: v.boolean(),
+          delaySeconds: v.optional(v.number()),
+          reverseAction: v.optional(
+            v.object({
+              addonId: v.string(),
+              action: v.string(),
+              payload: v.optional(v.any()),
+            }),
+          ),
+        }),
+      ),
+    }),
+  ),
 });
 
 const seo = {
@@ -356,6 +387,13 @@ const schema = defineSchema(
       attempt: v.number(),
       createdAt: v.number(),
     }).index("by_createdAt", ["createdAt"]),
+
+    // ─── API v1 (integração de entrega p/ addons) ───
+    apiKeysV1,
+    deliveryCommands,
+    deliveryAttempts,
+    addonServers,
+    apiLogs,
 
     // ─── Auditoria ───
     auditLogs: defineTable({

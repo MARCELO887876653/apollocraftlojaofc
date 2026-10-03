@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Loader2, CheckCircle2, XCircle, CreditCard, Gamepad2, KeyRound, Copy,
-  Plus, Trash2, BookMarked, Terminal,
+  Plus, Trash2, BookMarked, Terminal, RefreshCw,
 } from "lucide-react";
 
 type Integrations = {
@@ -169,7 +169,180 @@ export default function AdminIntegrations() {
       </Card>
 
       <ApiKeysSection />
+      <ApiV1Section />
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// API v1 — entrega automática p/ addons Minecraft (fila própria)
+// ─────────────────────────────────────────────────────────────
+
+const V1_SCOPES: Array<{ value: string; label: string }> = [
+  { value: "deliveries:read", label: "Ler entregas (fila)" },
+  { value: "deliveries:update", label: "Atualizar entregas" },
+  { value: "users:queue", label: "Ler entregas de jogadores" },
+  { value: "users:schedules", label: "Ler agendamentos" },
+  { value: "server:heartbeat", label: "Heartbeat do servidor" },
+];
+
+function ApiV1Section() {
+  const keys = useQuery(api.apiKeysV1.adminList) as any[] | undefined;
+  const createKey = useMutation(api.apiKeysV1.adminCreate);
+  const regenerate = useMutation(api.apiKeysV1.adminRegenerate);
+  const setActive = useMutation(api.apiKeysV1.adminSetActive);
+  const removeKey = useMutation(api.apiKeysV1.adminRemove);
+
+  const [form, setForm] = useState({ name: "", description: "", serverId: "", addonId: "" });
+  const [scopes, setScopes] = useState<string[]>(["deliveries:read", "deliveries:update", "users:queue", "users:schedules", "server:heartbeat"]);
+  const [creating, setCreating] = useState(false);
+  const [newToken, setNewToken] = useState<string | null>(null);
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+  const create = async () => {
+    if (!form.name.trim()) return toast.error("Dê um nome para a chave");
+    setCreating(true);
+    try {
+      const res: any = await createKey({
+        name: form.name,
+        description: form.description || undefined,
+        serverId: form.serverId.trim() || "GLOBAL",
+        addonId: form.addonId.trim() || undefined,
+        scopes,
+      });
+      setNewToken(res.token);
+      setForm({ name: "", description: "", serverId: "", addonId: "" });
+      toast.success("Chave criada — copie agora, ela só é exibida uma vez!");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <KeyRound className="size-5 text-sky-400" />
+          <CardTitle className="text-base">API v1 — Entrega automática (addons)</CardTitle>
+        </div>
+        <CardDescription>
+          Fila própria para addons do servidor Minecraft: consultem entregas pendentes, executam e confirmam o resultado.
+          Base URL: <code className="rounded bg-muted px-1">{origin}/api/v1</code> · Documentação: <a className="underline" href="/docs/api" target="_blank">/docs/api</a>
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <Label>Nome *</Label>
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Servidor Survival" />
+          </div>
+          <div>
+            <Label>Descrição</Label>
+            <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Addon principal do servidor Survival" />
+          </div>
+          <div>
+            <Label>Servidor (server_id)</Label>
+            <Input value={form.serverId} onChange={(e) => setForm({ ...form, serverId: e.target.value })} placeholder="survival-01 ou GLOBAL" />
+          </div>
+          <div>
+            <Label>Addon (opcional)</Label>
+            <Input value={form.addonId} onChange={(e) => setForm({ ...form, addonId: e.target.value })} placeholder="economy, ranks, kits…" />
+          </div>
+        </div>
+        <div>
+          <Label>Permissões (scopes)</Label>
+          <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+            {V1_SCOPES.map((s) => (
+              <label key={s.value} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={scopes.includes(s.value)}
+                  onChange={(e) =>
+                    setScopes(e.target.checked ? [...scopes, s.value] : scopes.filter((x) => x !== s.value))
+                  }
+                />
+                <code className="text-xs">{s.value}</code> <span className="text-xs text-muted-foreground">— {s.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <Button onClick={create} disabled={creating}>
+          {creating ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />} Criar chave de API
+        </Button>
+
+        {newToken && (
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4">
+            <p className="text-sm font-semibold text-emerald-700">Copie sua chave agora — ela NÃO será exibida novamente</p>
+            <div className="mt-3 flex gap-2">
+              <code className="flex-1 truncate rounded-lg border bg-background px-3 py-2 text-xs">{newToken}</code>
+              <Button variant="secondary" size="sm" onClick={() => { navigator.clipboard.writeText(newToken); toast.success("Copiada!"); }}>
+                <Copy className="mr-1.5 size-3.5" /> Copiar
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <Separator />
+
+        {keys === undefined ? (
+          <Loader2 className="mx-auto size-5 animate-spin" />
+        ) : keys.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma chave v1 criada ainda.</p>
+        ) : (
+          <div className="space-y-2">
+            {keys.map((k) => (
+              <div key={k._id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {k.name} <span className="text-xs text-muted-foreground">· {k.serverId}{k.addonId ? ` · ${k.addonId}` : ""}</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {k.prefix}…{k.lastFour} · {k.scopes.length} permissões · criada {new Date(k.createdAt).toLocaleDateString("pt-BR")}
+                    {k.lastUsedAt ? ` · último uso ${new Date(k.lastUsedAt).toLocaleString("pt-BR")}` : " · nunca usada"}
+                  </p>
+                </div>
+                <Badge className={k.active && !k.revoked ? "bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/15" : "bg-zinc-500/15 text-zinc-600 hover:bg-zinc-500/15"}>
+                  {k.revoked ? "Revogada" : k.active ? "Ativa" : "Inativa"}
+                </Badge>
+                <div className="flex items-center gap-1">
+                  <Switch checked={k.active && !k.revoked} onCheckedChange={(v) => setActive({ id: k._id as any, active: v }).catch((e: any) => toast.error(e.message))} />
+                  <Button
+                    variant="ghost" size="icon" className="size-8"
+                    aria-label="Regenerar chave"
+                    onClick={async () => {
+                      if (!confirm(`Regenerar a chave "${k.name}"? A chave antiga para de funcionar imediatamente.`)) return;
+                      try {
+                        const res: any = await regenerate({ id: k._id as any });
+                        setNewToken(res.token);
+                        toast.success("Chave regenerada — copie a nova agora!");
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "Erro");
+                      }
+                    }}
+                  >
+                    <RefreshCw className="size-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost" size="icon" className="size-8 text-red-600"
+                    aria-label="Excluir chave"
+                    onClick={async () => {
+                      if (!confirm(`Excluir a chave "${k.name}"?`)) return;
+                      try { await removeKey({ id: k._id as any }); toast.success("Chave excluída"); }
+                      catch (e) { toast.error(e instanceof Error ? e.message : "Erro"); }
+                    }}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

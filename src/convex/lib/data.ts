@@ -48,7 +48,7 @@ export async function setSetting(
 // ─── Defaults (usados como fallback caso a config não exista) ───
 
 export const DEFAULT_STORE = {
-  name: "RubyCraft",
+  name: "Apollo Craft",
   description: "A loja definitiva para VIPs, cash e upgrades do seu servidor — entrega automática 24/7.",
   logoUrl: "",
   faviconUrl: "",
@@ -75,23 +75,23 @@ export const DEFAULT_STORE = {
     { key: "uuid", label: "UUID do Minecraft", enabled: false, required: false },
   ],
   seo: {
-    title: "RubyCraft — Loja Oficial",
+    title: "Apollo Craft — Loja Oficial",
     description: "Compre VIPs, cash e upgrades com entrega automática e pagamento seguro via PIX.",
     ogImage: "",
     canonical: "",
   },
 };
 
-/** Tema dark permanente da RubyCraft (estilo vitrine escura, vermelho rubi, CTA branco). */
+/** Tema dark permanente da Apollo Craft (estilo vitrine escura, azul gelo/ciano, CTA branco). */
 export const DEFAULT_THEME = {
-  primary: "#e11d1d",
-  primaryForeground: "#ffffff",
-  secondary: "#1a1c24",
-  secondaryForeground: "#eef0f5",
-  background: "#0a0b10",
-  foreground: "#f1f2f7",
-  card: "#12141b",
-  border: "#24262e",
+  primary: "#38bdf8",
+  primaryForeground: "#06121a",
+  secondary: "#151c28",
+  secondaryForeground: "#e6f0fa",
+  background: "#0b1017",
+  foreground: "#eaf2fb",
+  card: "#121926",
+  border: "#243040",
   radius: 14,
   font: "Inter",
   darkMode: true,
@@ -123,7 +123,7 @@ export async function ensureDefaults(ctx: MutationCtx) {
       ],      [
         "footer",
         {
-          about: "RubyCraft — sua loja de confiança com entrega automática e pagamento seguro via PIX.",
+          about: "Apollo Craft — sua loja de confiança com entrega automática e pagamento seguro via PIX.",
           columns: [{ title: "Institucional", links: [{ label: "Termos de uso", url: "/p/termos" }, { label: "Privacidade", url: "/p/privacidade" }] }],
           copyright: "",
         },

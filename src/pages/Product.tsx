@@ -271,7 +271,7 @@ export default function ProductPage() {
                     addToCart();
                     navigate("/checkout");
                   }}
-                  className="h-12 w-full rounded-full bg-white text-base font-bold text-zinc-950 shadow-lg shadow-red-500/20 hover:bg-zinc-200"
+                  className="h-12 w-full rounded-full bg-white text-base font-bold text-zinc-950 shadow-lg shadow-sky-500/20 hover:bg-zinc-200"
                 >
                   <ShoppingCart className="mr-2 size-5" /> Comprar agora
                 </Button>
@@ -293,7 +293,7 @@ export default function ProductPage() {
           {/* Vantagens */}
           <div className="mt-5 grid grid-cols-2 gap-3">
             <div className="flex items-center gap-3 rounded-2xl border p-3.5">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-sky-500">
                 <GemIcon className="size-4.5" />
               </span>
               <div className="min-w-0">
@@ -302,7 +302,7 @@ export default function ProductPage() {
               </div>
             </div>
             <div className="flex items-center gap-3 rounded-2xl border p-3.5">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-sky-500">
                 <Zap className="size-4.5" />
               </span>
               <div className="min-w-0">
@@ -318,7 +318,7 @@ export default function ProductPage() {
             <ul className="mt-4 space-y-2">
               {(product.benefits as string[]).map((b, i) => (
                 <li key={i} className="flex items-center gap-2 text-sm">
-                  <GemIcon className="size-3.5 text-red-500" /> {b}
+                  <GemIcon className="size-3.5 text-sky-500" /> {b}
                 </li>
               ))}
             </ul>

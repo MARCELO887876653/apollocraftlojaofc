@@ -115,7 +115,7 @@ export default function CartPage() {
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <Link to="/loja" className="block truncate font-bold uppercase hover:text-red-400">
+                      <Link to="/loja" className="block truncate font-bold uppercase hover:text-sky-400">
                         {item.name}
                       </Link>
                       <p className="text-sm text-muted-foreground">{formatBRL(item.unitPriceCents)}</p>
@@ -151,7 +151,7 @@ export default function CartPage() {
                       <button
                         aria-label="Remover"
                         onClick={() => cart.remove(item.productId, item.variantId)}
-                        className="ml-1 flex size-9 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 text-red-500 transition-colors hover:bg-red-500/20"
+                        className="ml-1 flex size-9 items-center justify-center rounded-full border border-sky-500/30 bg-sky-500/10 text-sky-500 transition-colors hover:bg-sky-500/20"
                       >
                         <X className="size-4" />
                       </button>
@@ -212,7 +212,7 @@ export default function CartPage() {
               <Button
                 size="lg"
                 onClick={() => navigate("/checkout")}
-                className="h-14 w-full rounded-2xl bg-white text-lg font-bold text-zinc-950 shadow-lg shadow-red-500/20 hover:bg-zinc-200"
+                className="h-14 w-full rounded-2xl bg-white text-lg font-bold text-zinc-950 shadow-lg shadow-sky-500/20 hover:bg-zinc-200"
               >
                 <Lock className="mr-2 size-4.5" /> Continuar para o pagamento
               </Button>

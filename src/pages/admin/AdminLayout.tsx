@@ -80,8 +80,8 @@ function AdminShell() {
       {/* Sidebar desktop */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r bg-sidebar lg:flex">
         <div className="flex h-16 items-center gap-2.5 border-b px-5">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-red-400 to-red-600 shadow-lg shadow-red-500/25">
-            <Store className="size-4.5 text-red-950" />
+          <span className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-sky-600 shadow-lg shadow-sky-500/25">
+            <Store className="size-4.5 text-sky-950" />
           </span>
           <div className="min-w-0">
             <p className="truncate text-sm font-bold leading-tight">{me.admin.name}</p>
@@ -133,10 +133,10 @@ function AdminShell() {
             onClick={() => setMobileOpen(true)}
             aria-label="Abrir menu"
           >
-            <span className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-red-400 to-red-600 shadow-lg shadow-red-500/25">
-              <Store className="size-4.5 text-red-950" />
+            <span className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-sky-600 shadow-lg shadow-sky-500/25">
+              <Store className="size-4.5 text-sky-950" />
             </span>
-            <span className="text-base font-extrabold tracking-tight">rubycraft</span>
+            <span className="text-base font-extrabold tracking-tight">apollocraft</span>
           </button>
           <div className="ml-auto flex items-center gap-1.5">
             <Button variant="ghost" size="icon" asChild aria-label="Ver loja" className="hidden sm:inline-flex">
@@ -162,8 +162,8 @@ function AdminShell() {
             />
             <div className="absolute inset-y-0 left-0 flex w-72 flex-col border-r bg-sidebar shadow-2xl">
               <div className="flex h-16 items-center gap-2.5 border-b px-5">
-                <span className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-red-400 to-red-600">
-                  <Store className="size-4.5 text-red-950" />
+                <span className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-sky-600">
+                  <Store className="size-4.5 text-sky-950" />
                 </span>
                 <p className="truncate text-sm font-bold">{me.admin.name}</p>
               </div>

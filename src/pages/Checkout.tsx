@@ -115,7 +115,7 @@ export default function CheckoutPage() {
         >
           <h2 className="text-xl font-extrabold tracking-tight">Formas de pagamento</h2>
           <div className="mt-4 flex items-center gap-3 rounded-2xl border-2 border-foreground/80 p-4">
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-teal-500/15 text-teal-500">
               <svg viewBox="0 0 24 24" fill="currentColor" className="size-5">
                 <path d="M6 3h12l4 6-10 12L2 9l4-6Zm2.4 2L6 8.4 12 15l6-6.6L15.6 5H8.4Z" />
               </svg>
@@ -123,7 +123,7 @@ export default function CheckoutPage() {
             <div className="min-w-0 flex-1">
               <p className="flex flex-wrap items-center gap-2 text-base font-bold">
                 Pix
-                <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-bold text-red-500">
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-500">
                   <Zap className="size-3" /> Mais rápido
                 </span>
               </p>
@@ -180,7 +180,7 @@ export default function CheckoutPage() {
             size="lg"
             disabled={submitting || missingRequired || !accepted}
             onClick={submit}
-            className="h-14 w-full rounded-2xl bg-white text-lg font-bold text-zinc-950 shadow-lg shadow-red-500/20 hover:bg-zinc-200"
+            className="h-14 w-full rounded-2xl bg-white text-lg font-bold text-zinc-950 shadow-lg shadow-sky-500/20 hover:bg-zinc-200"
           >
             {submitting ? (
               <><Loader2 className="mr-2 size-5 animate-spin" /> Processando...</>
@@ -199,7 +199,7 @@ export default function CheckoutPage() {
         >
           <div className="flex flex-wrap items-center justify-between gap-2 border-b p-5 sm:px-6">
             <h2 className="text-xl font-extrabold tracking-tight">Resumo do pedido</h2>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-bold text-red-500">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-500">
               <Lock className="size-3.5" /> Pagamento seguro
             </span>
           </div>
@@ -252,7 +252,7 @@ export default function CheckoutPage() {
                     <button
                       aria-label="Remover"
                       onClick={() => cart.remove(item.productId, item.variantId)}
-                      className="ml-1 flex size-9 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 text-red-500 transition-colors hover:bg-red-500/20"
+                      className="ml-1 flex size-9 items-center justify-center rounded-full border border-sky-500/30 bg-sky-500/10 text-sky-500 transition-colors hover:bg-sky-500/20"
                     >
                       <X className="size-4" />
                     </button>

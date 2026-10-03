@@ -34,7 +34,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const applyBrand = useMutation(api.settings.applyBrand);
   const migrationDone = useRef(false);
 
-  // Garante que lojas antigas migrem para a identidade RubyCraft (idempotente).
+  // Garante que lojas antigas migrem para a identidade Apollo Craft (idempotente).
   useEffect(() => {
     if (!theme || migrationDone.current) return;
     migrationDone.current = true;
@@ -44,22 +44,22 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!theme) return;
     const root = document.documentElement;
-    const bg = theme.background || "#0a0b10";
-    const fg = theme.foreground || "#f1f2f7";
-    const primary = theme.primary || "#e11d1d";
-    const secondary = theme.secondary || "#1a1c24";
+    const bg = theme.background || "#0b1017";
+    const fg = theme.foreground || "#eaf2fb";
+    const primary = theme.primary || "#38bdf8";
+    const secondary = theme.secondary || "#151c28";
 
     const c = (hex: string) => hex; // cores hex são CSS válido
 
     root.style.setProperty("--radius", `${theme.radius ?? 12}px`);
     root.style.setProperty("--background", c(bg));
     root.style.setProperty("--foreground", c(fg));
-    root.style.setProperty("--card", c(theme.card || "#12141b"));
+    root.style.setProperty("--card", c(theme.card || "#121926"));
     root.style.setProperty("--card-foreground", c(fg));
-    root.style.setProperty("--popover", c(theme.card || "#12141b"));
+    root.style.setProperty("--popover", c(theme.card || "#121926"));
     root.style.setProperty("--popover-foreground", c(fg));
     root.style.setProperty("--primary", c(primary));
-    root.style.setProperty("--primary-foreground", c(theme.primaryForeground || "#ffffff"));
+    root.style.setProperty("--primary-foreground", c(theme.primaryForeground || "#06121a"));
     root.style.setProperty("--secondary", c(secondary));
     root.style.setProperty("--secondary-foreground", c(theme.secondaryForeground || fg));
     root.style.setProperty("--muted", c(mix(fg, bg, 0.06)));
@@ -70,16 +70,16 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     root.style.setProperty("--input", c(theme.border || mix(fg, bg, 0.14)));
     root.style.setProperty("--ring", c(primary));
     // Sidebar acompanha o tema da loja
-    root.style.setProperty("--sidebar", c(theme.card || "#12141b"));
+    root.style.setProperty("--sidebar", c(theme.card || "#121926"));
     root.style.setProperty("--sidebar-foreground", c(fg));
     root.style.setProperty("--sidebar-primary", c(primary));
-    root.style.setProperty("--sidebar-primary-foreground", c(theme.primaryForeground || "#ffffff"));
+    root.style.setProperty("--sidebar-primary-foreground", c(theme.primaryForeground || "#06121a"));
     root.style.setProperty("--sidebar-accent", c(mix(primary, bg, 0.16)));
     root.style.setProperty("--sidebar-accent-foreground", c(fg));
     root.style.setProperty("--sidebar-border", c(theme.border || mix(fg, bg, 0.14)));
     root.style.setProperty("--sidebar-ring", c(primary));
 
-    // Sempre escuro na RubyCraft
+    // Sempre escuro na Apollo Craft
     root.classList.add("dark");
     root.style.colorScheme = "dark";
   }, [theme]);

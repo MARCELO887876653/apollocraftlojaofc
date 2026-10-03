@@ -38,7 +38,7 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   const navItems = (menu ?? []).filter(Boolean);
-  const storeName = store?.name ?? "RubyCraft";
+  const storeName = store?.name ?? "Apollo Craft";
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -59,8 +59,8 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
                 className="size-11 shrink-0 rounded-xl object-cover"
               />
             ) : (
-              <span className="relative flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-red-400 to-red-600 shadow-lg shadow-red-500/25 transition-transform group-hover:scale-105">
-                <ShoppingBag className="size-5 text-red-950" />
+              <span className="relative flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-sky-600 shadow-lg shadow-sky-500/25 transition-transform group-hover:scale-105">
+                <ShoppingBag className="size-5 text-sky-950" />
               </span>
             )}
             <span className="truncate text-xl font-extrabold tracking-tight">
@@ -163,8 +163,8 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
           {store?.logoUrl ? (
             <img src={store.logoUrl} alt={storeName} className="size-16 rounded-2xl object-cover" />
           ) : (
-            <span className="flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-red-400 to-red-600 shadow-lg shadow-red-500/25">
-              <ShoppingBag className="size-7 text-red-950" />
+            <span className="flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-sky-600 shadow-lg shadow-sky-500/25">
+              <ShoppingBag className="size-7 text-sky-950" />
             </span>
           )}
           <p className="text-2xl font-extrabold tracking-tight sm:text-3xl">Loja - {storeName}</p>

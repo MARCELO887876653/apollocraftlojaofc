@@ -43,7 +43,7 @@ function CategoryProductCard({ product, index }: { product: Product; index: numb
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay: Math.min(index * 0.05, 0.3) }}
-      className="group flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-red-500/40 hover:shadow-[0_0_30px_-6px_rgb(225_29_29/0.4)]"
+      className="group flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-sky-500/40 hover:shadow-[0_0_30px_-6px_rgb(56_189_248/0.4)]"
     >
       <Link
         to={`/produto/${product.slug}`}
@@ -72,7 +72,7 @@ function CategoryProductCard({ product, index }: { product: Product; index: numb
       <div className="flex flex-1 flex-col p-4">
         <Link
           to={`/produto/${product.slug}`}
-          className="line-clamp-1 text-base font-extrabold uppercase tracking-tight transition-colors hover:text-red-400"
+          className="line-clamp-1 text-base font-extrabold uppercase tracking-tight transition-colors hover:text-sky-400"
         >
           {product.name}
         </Link>
@@ -86,12 +86,12 @@ function CategoryProductCard({ product, index }: { product: Product; index: numb
               <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs font-bold text-foreground">
                 <TrendingDownIcon /> -{discount}%
               </span>
-              <span className="ml-auto flex size-8 items-center justify-center rounded-lg bg-red-500/15 text-red-500">
+              <span className="ml-auto flex size-8 items-center justify-center rounded-lg bg-sky-500/15 text-sky-500">
                 <GemIcon />
               </span>
             </>
           ) : (
-            <span className="ml-auto flex size-8 items-center justify-center rounded-lg bg-red-500/15 text-red-500">
+            <span className="ml-auto flex size-8 items-center justify-center rounded-lg bg-sky-500/15 text-sky-500">
               <GemIcon />
             </span>
           )}
@@ -182,7 +182,7 @@ export default function CategoryPage() {
                   className={cn(
                     "rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors",
                     selectedSlug === category.slug
-                      ? "border-transparent bg-red-500/15 text-red-400"
+                      ? "border-transparent bg-sky-500/15 text-sky-400"
                       : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )}
                 >
@@ -195,7 +195,7 @@ export default function CategoryPage() {
                     className={cn(
                       "rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors",
                       selectedSlug === s.slug
-                        ? "border-transparent bg-red-500/15 text-red-400"
+                        ? "border-transparent bg-sky-500/15 text-sky-400"
                         : "text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                   >

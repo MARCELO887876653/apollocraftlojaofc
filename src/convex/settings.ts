@@ -5,18 +5,18 @@ import { requireAdmin, logAudit } from "./lib/admin";
 import { getSetting, setSetting, DEFAULT_STORE, DEFAULT_THEME, DEFAULT_HOMEPAGE } from "./lib/data";
 
 /**
- * Migration idempotente: garante RubyCraft + tema dark. Só preenche o que
- * ainda usa o valor padrão antigo (NexaStore / tema claro), sem sobrescrever
- * personalizações reais do admin.
+ * Migration idempotente: garante Apollo Craft + tema azul/navy. Só preenche o
+ * que ainda usa o valor padrão antigo (NexaStore, RubyCraft, tema claro),
+ * sem sobrescrever personalizações reais do admin.
  */
 export const applyBrandDefaults = internalMutation({
   args: {},
   handler: async (ctx) => {
     const OLD_VALUES = {
-      storeNames: ["NexaStore", "Loja", "ApolloCraft"],
+      storeNames: ["NexaStore", "Loja", "ApolloCraft", "RubyCraft"],
       oldSeoTitle: "ApolloCraft — Loja Oficial",
-      oldPrimaries: ["#7c3aed", "#6366f1", "#818cf8"], // roxo original e indigos anteriores
-      oldBackgrounds: ["#ffffff", "#0b0d12", "#0a0c10"],
+      oldPrimaries: ["#7c3aed", "#6366f1", "#818cf8", "#e11d1d"], // roxo original, indigos e rubi anteriores
+      oldBackgrounds: ["#ffffff", "#0b0d12", "#0a0c10", "#0a0b10"],
     };
 
     // store
@@ -260,7 +260,7 @@ export const resetTheme = mutation({
   },
 });
 
-/** Aplica a identidade RubyCraft + tema dark (executa a migration acima). */
+/** Aplica a identidade Apollo Craft + tema azul/navy (executa a migration acima). */
 export const applyBrand = mutation({
   args: {},
   handler: async (ctx) => {

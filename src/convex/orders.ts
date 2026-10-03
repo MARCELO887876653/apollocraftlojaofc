@@ -465,6 +465,9 @@ export const adminUpdateStatus = mutation({
         ],
       });
       await ctx.scheduler.runAfter(0, internal.deliveriesQueue.processOrder, { orderId: id });
+      await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCreateForOrder, {
+        orderId: id,
+      });
       await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
         event: "order.paid",
         payload: {
@@ -489,6 +492,12 @@ export const adminUpdateStatus = mutation({
         { status: paymentStatus, at: now, note: note ?? `Atualizado manualmente por ${admin.name}` },
       ],
     });
+    if (["refunded", "cancelled", "expired", "failed"].includes(paymentStatus)) {
+      await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCancelForOrder, {
+        orderId: id,
+        reason: `Pedido ${paymentStatus} (${admin.name})`,
+      });
+    }
     await logAudit(ctx, admin, "order.status_update", "order", id, { paymentStatus });
   },
 });
@@ -521,6 +530,10 @@ export const adminCancel = mutation({
     for (const d of deliveries) {
       if (d.status !== "delivered") await ctx.db.delete(d._id);
     }
+    await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCancelForOrder, {
+      orderId: id,
+      reason: `Cancelado por ${admin.name}`,
+    });
     await ctx.db.patch(id, {
       paymentStatus: "cancelled",
       deliveryStatus: "pending",

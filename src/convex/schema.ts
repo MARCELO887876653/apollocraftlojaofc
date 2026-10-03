@@ -1,6 +1,7 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { apiV1Tables, deliveryV1Validator } from "./lib/apiSchema";
 
 // default user roles. can add / remove based on the project as needed
 export const ROLES = {
@@ -63,6 +64,9 @@ const schema = defineSchema(
   {
     // default auth tables using convex auth.
     ...authTables, // do not remove or modify
+
+    // API v1: chaves, fila de entregas, tentativas, heartbeat e logs
+    ...apiV1Tables,
 
     users: defineTable({
       name: v.optional(v.string()),
@@ -134,6 +138,8 @@ const schema = defineSchema(
       order: v.number(),
       benefits: v.array(v.string()),
       delivery: deliveryConfig,
+      // Entrega automática v1 (fila própria + API). Opcional e aditivo.
+      deliveryV1: v.optional(deliveryV1Validator),
       salesCount: v.number(),
       ...seo,
       createdAt: v.number(),

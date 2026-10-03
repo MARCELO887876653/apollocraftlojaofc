@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import {
   LayoutDashboard, Package, FolderTree, ShoppingCart, Ticket, Users, Truck,
   FileText, Palette, Settings, Plug, ShieldCheck, ScrollText, Store, Loader2,
-  Home, BarChart3, MoreHorizontal, Megaphone, Bell, ExternalLink, UserPlus,
+  Home, BarChart3, MoreHorizontal, Megaphone, Bell, ExternalLink, UserPlus, Zap,
 } from "lucide-react";
 
 type NavItem = {
@@ -31,6 +31,8 @@ const NAV: NavItem[] = [
   { to: "/painel/cupons", label: "Cupons", icon: Ticket, perm: "coupons.manage", more: true },
   { to: "/painel/promocoes", label: "Promoções", icon: Megaphone, perm: "products.manage", more: true, badge: "novo" },
   { to: "/painel/entregas", label: "Entregas", icon: Truck, perm: "deliveries.view", more: true },
+  { to: "/painel/entregas-auto", label: "Entregas automáticas", icon: Zap, perm: "deliveries.view", more: true },
+  { to: "/painel/api-logs", label: "Logs da API", icon: ScrollText, perm: "logs.view", more: true },
   { to: "/painel/conteudo", label: "Postagens", icon: FileText, perm: "content.manage", more: true },
   { to: "/painel/clientes", label: "Clientes", icon: Users, perm: "customers.view", more: true },
   { to: "/painel/equipe", label: "Membros", icon: UserPlus, perm: "team.manage", more: true },

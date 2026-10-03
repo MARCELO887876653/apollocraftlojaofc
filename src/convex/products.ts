@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { slugify } from "./lib/data";
+import { deliveryV1Validator } from "./lib/apiSchema";
 
 // ─── Público ───
 
@@ -231,6 +232,7 @@ const productInput = v.object({
   order: v.number(),
   benefits: v.array(v.string()),
   delivery: deliveryValidator,
+  deliveryV1: v.optional(deliveryV1Validator),
   seoTitle: v.optional(v.string()),
   seoDescription: v.optional(v.string()),
 });

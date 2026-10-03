@@ -81,8 +81,12 @@ export async function transitionOrder(ctx: any, order: any, mpStatus: string) {
       updatedAt: now,
       statusHistory: [...order.statusHistory, { status: "paid", at: now, note: "Pagamento confirmado pelo gateway" }],
     });
-    // dispara processamento da fila de entrega
+    // dispara processamento da fila de entrega (legado)
     await ctx.scheduler.runAfter(0, internal.deliveriesQueue.processOrder, { orderId: order._id });
+    // cria a fila de entregas automáticas (API v1) — idempotente
+    await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCreateForOrder, {
+      orderId: order._id,
+    });
     // dispara webhooks de saída
     await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
       event: "order.paid",
@@ -106,6 +110,11 @@ export async function transitionOrder(ctx: any, order: any, mpStatus: string) {
       paymentStatus: mpStatus,
       updatedAt: now,
       statusHistory: [...order.statusHistory, { status: mpStatus, at: now, note: "Status atualizado pelo gateway" }],
+    });
+    // reembolso/cancelamento: cancela entregas pendentes e agenda reversão
+    await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCancelForOrder, {
+      orderId: order._id,
+      reason: `Pagamento ${mpStatus} pelo gateway`,
     });
   }
 }

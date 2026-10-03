@@ -23,6 +23,7 @@ const CheckoutPage = lazy(() => import("./pages/Checkout.tsx"));
 const OrderStatusPage = lazy(() => import("./pages/OrderStatus.tsx"));
 const AccountPage = lazy(() => import("./pages/Account.tsx"));
 const StaticPage = lazy(() => import("./pages/StaticPage.tsx"));
+const ApiDocs = lazy(() => import("./pages/ApiDocs.tsx"));
 
 const AdminLayout = lazy(() => import("./pages/admin/AdminLayout.tsx"));
 const AdminDashboard = lazy(() => import("./pages/admin/Dashboard.tsx"));
@@ -34,6 +35,8 @@ const AdminCategories = lazy(() => import("./pages/admin/Categories.tsx"));
 const AdminCoupons = lazy(() => import("./pages/admin/Coupons.tsx"));
 const AdminCustomers = lazy(() => import("./pages/admin/Customers.tsx"));
 const AdminDeliveries = lazy(() => import("./pages/admin/Deliveries.tsx"));
+const AdminDeliveriesAuto = lazy(() => import("./pages/admin/DeliveriesAuto.tsx"));
+const AdminApiLogs = lazy(() => import("./pages/admin/ApiLogs.tsx"));
 const AdminContent = lazy(() => import("./pages/admin/Content.tsx"));
 const AdminAppearance = lazy(() => import("./pages/admin/Appearance.tsx"));
 const AdminIntegrations = lazy(() => import("./pages/admin/Integrations.tsx"));
@@ -163,6 +166,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/blog" element={<StaticPage />} />
                   <Route path="/blog/:slug" element={<StaticPage />} />
                   <Route path="/p/:slug" element={<StaticPage />} />
+                  <Route path="/docs/api" element={<ApiDocs />} />
 
                   {/* Auth */}
                   <Route
@@ -189,6 +193,8 @@ createRoot(document.getElementById("root")!).render(
                     <Route path="promocoes" element={<AdminPromotions />} />
                     <Route path="clientes" element={<AdminCustomers />} />
                     <Route path="entregas" element={<AdminDeliveries />} />
+                    <Route path="entregas-auto" element={<AdminDeliveriesAuto />} />
+                    <Route path="api-logs" element={<AdminApiLogs />} />
                     <Route path="conteudo" element={<AdminContent />} />
                     <Route path="aparencia" element={<AdminAppearance />} />
                     <Route path="integracoes" element={<AdminIntegrations />} />

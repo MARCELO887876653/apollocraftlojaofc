@@ -72,4 +72,59 @@ for (const method of ["GET", "POST"] as const) {
   });
 }
 
+// ─── API v1 (fila de entregas automáticas) ───
+// Autenticada por `Authorization: Bearer sk_live_...` (ou X-Api-Key).
+// GET /api/v1/app/queued_commands
+// POST /api/v1/app/queued_commands/claim
+// GET /api/v1/app/user_queue/{id}
+// GET /api/v1/app/user_schedules/{id}
+// PATCH /api/v1/app/command/{id}
+// POST /api/v1/app/heartbeat
+// GET /api/v1/app/me
+
+const apiV1 = httpAction(async (ctx, request) => {
+  const url = new URL(request.url);
+  const auth = request.headers.get("authorization") ?? "";
+  const token =
+    auth.replace(/^Bearer\s+/i, "").trim() ||
+    (request.headers.get("x-api-key") ?? "").trim();
+  const query: Record<string, string> = {};
+  url.searchParams.forEach((value, k) => {
+    query[k] = value;
+  });
+  const bodyText =
+    request.method === "POST" || request.method === "PATCH"
+      ? await request.text()
+      : undefined;
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
+  try {
+    const result = await ctx.runAction(api.apiV1.handle, {
+      method: request.method,
+      path: url.pathname,
+      token,
+      bodyText,
+      query,
+      ip,
+    });
+    return Response.json(result.body ?? {}, {
+      status: result.status,
+      headers: result.headers ?? {},
+    });
+  } catch (e) {
+    console.error("[api/v1] error:", e);
+    return Response.json(
+      { errors: [{ message: "Erro interno no servidor.", code: "INTERNAL_ERROR" }] },
+      { status: 500 },
+    );
+  }
+});
+
+for (const method of ["GET", "POST", "PATCH"] as const) {
+  http.route({
+    pathPrefix: "/api/v1/",
+    method,
+    handler: apiV1,
+  });
+}
+
 export default http;

@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ImageUpload } from "@/components/admin/ImageUpload";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Loader2, Search, Package, ImagePlus, X, MoreVertical, GripVertical, ChevronDown, Terminal } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Search, Package, ImagePlus, X, MoreVertical, GripVertical, ChevronDown, Terminal, Plug } from "lucide-react";
 
 type Product = {
   _id: string; name: string; slug: string; image?: string;
@@ -37,8 +37,33 @@ function emptyForm() {
     categoryId: "", tags: [] as string[], price: "0", compareAt: "", stock: "0",
     unlimitedStock: false, active: true, featured: false, popular: false, hidden: false,
     minQty: "1", maxQty: "99", order: "0", benefits: [] as string[],
-    delivery: EMPTY_DELIVERY as any, seoTitle: "", seoDescription: "",
+    delivery: EMPTY_DELIVERY as any,
+    deliveryV1: { enabled: false, actions: [] as any[] },
+    seoTitle: "", seoDescription: "",
   };
+}
+
+/** Atualiza uma ação da entrega automática v1 no formulário. */
+function updateV1Action(setForm: any, index: number, patch: any) {
+  setForm((s: any) => ({
+    ...s,
+    deliveryV1: {
+      ...s.deliveryV1,
+      actions: s.deliveryV1.actions.map((a: any, j: number) =>
+        j === index ? { ...a, ...patch } : a,
+      ),
+    },
+  }));
+}
+
+/** Converte um texto JSON em objeto (vazio → undefined). Lança em JSON inválido. */
+function parseJsonField(text?: string): any {
+  if (!text || !text.trim()) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("JSON inválido no payload de uma ação de entrega automática");
+  }
 }
 
 function toForm(p: Product & any): any {
@@ -50,6 +75,23 @@ function toForm(p: Product & any): any {
     featured: p.featured, popular: p.popular, hidden: p.hidden,
     minQty: String(p.minQty), maxQty: String(p.maxQty), order: String(p.order),
     benefits: p.benefits ?? [], delivery: { ...EMPTY_DELIVERY, ...p.delivery },
+    deliveryV1: p.deliveryV1
+      ? {
+          enabled: p.deliveryV1.enabled,
+          actions: (p.deliveryV1.actions ?? []).map((a: any) => ({
+            action: a.action ?? "",
+            command: a.command ?? "",
+            addonId: a.addonId ?? "",
+            serverId: a.serverId ?? "",
+            offlineExecute: a.offlineExecute ?? true,
+            delaySeconds: a.delaySeconds != null ? String(a.delaySeconds) : "",
+            payloadText: a.payload != null ? JSON.stringify(a.payload, null, 2) : "",
+            reverseAction: a.reverseAction ?? "",
+            reversePayloadText: a.reversePayload != null ? JSON.stringify(a.reversePayload, null, 2) : "",
+            reverseDelaySeconds: a.reverseDelaySeconds != null ? String(a.reverseDelaySeconds) : "",
+          })),
+        }
+      : { enabled: false, actions: [] },
     seoTitle: p.seoTitle ?? "", seoDescription: p.seoDescription ?? "",
   };
 }
@@ -82,6 +124,25 @@ function formToData(form: any) {
         ? (form.delivery.commands ?? []).map((s: string) => s.trim()).filter(Boolean)
         : form.delivery.commands,
     },
+    deliveryV1: form.deliveryV1?.enabled
+      ? {
+          enabled: true,
+          actions: (form.deliveryV1.actions ?? [])
+            .map((a: any) => ({
+              action: (a.action ?? "").trim(),
+              command: a.command?.trim() || undefined,
+              payload: parseJsonField(a.payloadText),
+              serverId: a.serverId?.trim() || undefined,
+              addonId: a.addonId?.trim() || undefined,
+              offlineExecute: a.offlineExecute ?? true,
+              delaySeconds: a.delaySeconds ? Number(a.delaySeconds) : undefined,
+              reverseAction: a.reverseAction?.trim() || undefined,
+              reversePayload: parseJsonField(a.reversePayloadText),
+              reverseDelaySeconds: a.reverseDelaySeconds ? Number(a.reverseDelaySeconds) : undefined,
+            }))
+            .filter((a: any) => a.action),
+        }
+      : { enabled: false, actions: [] },
     seoTitle: form.seoTitle || undefined,
     seoDescription: form.seoDescription || undefined,
   };
@@ -523,6 +584,183 @@ export default function AdminProducts() {
                 </CardContent>
               </Card>
             )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Plug className="size-4 text-sky-400" /> Entrega automática (API v1)
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Cria entregas na fila da sua API quando o pagamento é aprovado. Use qualquer{" "}
+                  <code className="rounded bg-muted px-1 font-mono">action</code> + payload JSON.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <label className="flex items-center justify-between text-sm">
+                  Ativar entrega automática
+                  <Switch
+                    checked={form.deliveryV1?.enabled ?? false}
+                    onCheckedChange={(v) =>
+                      setForm((s: any) => ({ ...s, deliveryV1: { ...s.deliveryV1, enabled: v } }))
+                    }
+                  />
+                </label>
+
+                {form.deliveryV1?.enabled && (
+                  <>
+                    {(form.deliveryV1.actions ?? []).map((a: any, i: number) => (
+                      <div key={i} className="space-y-3 rounded-xl border p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase text-muted-foreground">
+                            Ação {i + 1}
+                          </span>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="text-red-600"
+                            aria-label="Remover ação"
+                            onClick={() =>
+                              setForm((s: any) => ({
+                                ...s,
+                                deliveryV1: {
+                                  ...s.deliveryV1,
+                                  actions: s.deliveryV1.actions.filter((_: any, j: number) => j !== i),
+                                },
+                              }))
+                            }
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div>
+                            <Label className="text-xs">Ação *</Label>
+                            <Input
+                              className="font-mono text-sm"
+                              placeholder="ADD_MONEY"
+                              value={a.action}
+                              onChange={(e) => updateV1Action(setForm, i, { action: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Addon</Label>
+                            <Input
+                              placeholder="economy"
+                              value={a.addonId}
+                              onChange={(e) => updateV1Action(setForm, i, { addonId: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Servidor</Label>
+                            <Input
+                              placeholder="GLOBAL"
+                              value={a.serverId}
+                              onChange={(e) => updateV1Action(setForm, i, { serverId: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Payload (JSON)</Label>
+                          <Textarea
+                            rows={3}
+                            className="font-mono text-sm"
+                            placeholder={'{ "amount": 10000 }'}
+                            value={a.payloadText}
+                            onChange={(e) => updateV1Action(setForm, i, { payloadText: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Comando (opcional)</Label>
+                          <Input
+                            className="font-mono text-sm"
+                            placeholder="money add {nickname} 10000"
+                            value={a.command}
+                            onChange={(e) => updateV1Action(setForm, i, { command: e.target.value })}
+                          />
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <Label className="text-xs">Executar após (segundos)</Label>
+                            <Input
+                              type="number"
+                              placeholder="0"
+                              value={a.delaySeconds}
+                              onChange={(e) => updateV1Action(setForm, i, { delaySeconds: e.target.value })}
+                            />
+                          </div>
+                          <label className="flex items-end gap-2 pb-2 text-sm">
+                            <Switch
+                              checked={a.offlineExecute}
+                              onCheckedChange={(v) => updateV1Action(setForm, i, { offlineExecute: v })}
+                            />
+                            Executar com jogador offline
+                          </label>
+                        </div>
+                        <div className="grid gap-3 rounded-lg bg-muted/30 p-3 sm:grid-cols-3">
+                          <div>
+                            <Label className="text-xs">Ação de reversão</Label>
+                            <Input
+                              className="font-mono text-sm"
+                              placeholder="REMOVE_RANK"
+                              value={a.reverseAction}
+                              onChange={(e) => updateV1Action(setForm, i, { reverseAction: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Payload da reversão</Label>
+                            <Input
+                              className="font-mono text-sm"
+                              placeholder='{ "rank": "ouro" }'
+                              value={a.reversePayloadText}
+                              onChange={(e) => updateV1Action(setForm, i, { reversePayloadText: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Reverter após (seg)</Label>
+                            <Input
+                              type="number"
+                              placeholder="2592000"
+                              value={a.reverseDelaySeconds}
+                              onChange={(e) => updateV1Action(setForm, i, { reverseDelaySeconds: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        setForm((s: any) => ({
+                          ...s,
+                          deliveryV1: {
+                            ...s.deliveryV1,
+                            actions: [
+                              ...s.deliveryV1.actions,
+                              {
+                                action: "",
+                                command: "",
+                                addonId: "",
+                                serverId: "",
+                                offlineExecute: true,
+                                delaySeconds: "",
+                                payloadText: "",
+                                reverseAction: "",
+                                reversePayloadText: "",
+                                reverseDelaySeconds: "",
+                              },
+                            ],
+                          },
+                        }))
+                      }
+                    >
+                      <Plus className="mr-2 size-4" /> Nova ação
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>

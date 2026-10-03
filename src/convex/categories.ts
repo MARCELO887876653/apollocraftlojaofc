@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { slugify } from "./lib/data";
+import { applyCategoryUpdate, createCategoryRecord } from "./lib/catalog";
 
 // ─── Público ───
 
@@ -54,18 +55,8 @@ export const create = mutation({
   args: { data: categoryInput },
   handler: async (ctx, { data }) => {
     const admin = await requireAdmin(ctx, "categories.manage");
-    let slug = slugify(data.name);
-    const clash = await ctx.db
-      .query("categories")
-      .withIndex("by_slug", (q) => q.eq("slug", slug))
-      .first();
-    if (clash) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
-    const id = await ctx.db.insert("categories", {
-      ...data,
-      slug,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
+    // mesma regra de negócio usada pela API v1 (lib/catalog)
+    const { id } = await createCategoryRecord(ctx, { ...data, createdSource: "ADMIN_PANEL" });
     await logAudit(ctx, admin, "category.create", "category", id, { name: data.name });
     return id;
   },
@@ -76,7 +67,7 @@ export const update = mutation({
   handler: async (ctx, { id, data }) => {
     const admin = await requireAdmin(ctx, "categories.manage");
     if (data.parentId === id) throw new Error("Categoria não pode ser pai dela mesma");
-    await ctx.db.patch(id, { ...data, updatedAt: Date.now() });
+    await applyCategoryUpdate(ctx, id, data);
     await logAudit(ctx, admin, "category.update", "category", id, data);
   },
 });

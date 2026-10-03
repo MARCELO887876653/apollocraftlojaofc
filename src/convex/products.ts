@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { slugify } from "./lib/data";
+import { applyProductUpdate, createProductRecord } from "./lib/catalog";
 import { deliveryV1Validator } from "./lib/apiSchema";
 
 // ─── Público ───
@@ -241,20 +242,8 @@ export const create = mutation({
   args: { data: productInput },
   handler: async (ctx, { data }) => {
     const admin = await requireAdmin(ctx, "products.manage");
-    let slug = slugify(data.name);
-    const clash = await ctx.db
-      .query("products")
-      .withIndex("by_slug", (q) => q.eq("slug", slug))
-      .first();
-    if (clash) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
-    const now = Date.now();
-    const id = await ctx.db.insert("products", {
-      ...data,
-      slug,
-      salesCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    });
+    // mesma regra de negócio usada pela API v1 (lib/catalog)
+    const { id } = await createProductRecord(ctx, { ...data, createdSource: "ADMIN_PANEL" });
     await logAudit(ctx, admin, "product.create", "product", id, { name: data.name });
     return id;
   },
@@ -264,7 +253,7 @@ export const update = mutation({
   args: { id: v.id("products"), data: productInput },
   handler: async (ctx, { id, data }) => {
     const admin = await requireAdmin(ctx, "products.manage");
-    await ctx.db.patch(id, { ...data, updatedAt: Date.now() });
+    await applyProductUpdate(ctx, id, data);
     await logAudit(ctx, admin, "product.update", "product", id, { name: data.name });
   },
 });

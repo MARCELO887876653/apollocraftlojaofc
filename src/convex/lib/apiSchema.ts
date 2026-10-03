@@ -14,6 +14,18 @@ export const API_SCOPES = {
   usersQueue: "users:queue",
   usersSchedules: "users:schedules",
   serverHeartbeat: "server:heartbeat",
+  // Catálogo (administração pela API v1 — usado por addons administrativos)
+  categoriesRead: "categories:read",
+  categoriesCreate: "categories:create",
+  categoriesUpdate: "categories:update",
+  categoriesDelete: "categories:delete",
+  productsRead: "products:read",
+  productsCreate: "products:create",
+  productsUpdate: "products:update",
+  productsDelete: "products:delete",
+  productsPublish: "products:publish",
+  deliveryRecipesRead: "delivery-recipes:read",
+  deliveryRecipesWrite: "delivery-recipes:write",
 } as const;
 
 export type ApiScope = (typeof API_SCOPES)[keyof typeof API_SCOPES];
@@ -26,6 +38,17 @@ export const apiScopeValidator = v.union(
   v.literal("users:queue"),
   v.literal("users:schedules"),
   v.literal("server:heartbeat"),
+  v.literal("categories:read"),
+  v.literal("categories:create"),
+  v.literal("categories:update"),
+  v.literal("categories:delete"),
+  v.literal("products:read"),
+  v.literal("products:create"),
+  v.literal("products:update"),
+  v.literal("products:delete"),
+  v.literal("products:publish"),
+  v.literal("delivery-recipes:read"),
+  v.literal("delivery-recipes:write"),
 );
 
 /** Status possíveis de uma entrega/comando. */
@@ -56,6 +79,8 @@ export const deliveryActionV1Validator = v.object({
 /** Configuração de entrega automática (v1) no produto. */
 export const deliveryV1Validator = v.object({
   enabled: v.boolean(),
+  // versão do formato da receita de entrega (permite evoluir sem quebrar)
+  version: v.optional(v.number()),
   actions: v.array(deliveryActionV1Validator),
 });
 
@@ -114,6 +139,8 @@ export const apiV1Tables = {
     claimedAt: v.optional(v.number()),
     claimExpiresAt: v.optional(v.number()),
     claimToken: v.optional(v.string()),
+    // snapshot da receita de entrega no momento da compra (compras antigas não mudam)
+    recipeSnapshot: v.optional(v.any()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

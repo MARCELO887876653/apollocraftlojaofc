@@ -109,6 +109,14 @@ const schema = defineSchema(
       parentId: v.optional(v.id("categories")),
       order: v.number(),
       active: v.boolean(),
+      // origem/sincronização (criado pela API v1 / addon)
+      externalId: v.optional(v.string()),
+      idempotencyKey: v.optional(v.string()),
+      createdSource: v.optional(v.string()),
+      sourceServerId: v.optional(v.string()),
+      sourceAddonId: v.optional(v.string()),
+      sourceApiKeyId: v.optional(v.string()),
+      archivedAt: v.optional(v.number()),
       ...seo,
       createdAt: v.number(),
       updatedAt: v.number(),
@@ -141,6 +149,15 @@ const schema = defineSchema(
       // Entrega automática v1 (fila própria + API). Opcional e aditivo.
       deliveryV1: v.optional(deliveryV1Validator),
       salesCount: v.number(),
+      // origem/sincronização (criado pela API v1 / addon) e rascunho/publicado
+      status: v.optional(v.string()), // DRAFT | PUBLISHED
+      externalId: v.optional(v.string()),
+      idempotencyKey: v.optional(v.string()),
+      createdSource: v.optional(v.string()), // ADMIN_PANEL | API | MINECRAFT_ADDON
+      sourceServerId: v.optional(v.string()),
+      sourceAddonId: v.optional(v.string()),
+      sourceApiKeyId: v.optional(v.string()),
+      archivedAt: v.optional(v.number()),
       ...seo,
       createdAt: v.number(),
       updatedAt: v.number(),

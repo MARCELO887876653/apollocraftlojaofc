@@ -65,6 +65,7 @@ const NAV = [
   { id: "limites", label: "Rate limit e erros" },
   { id: "exemplo", label: "Exemplo de addon (registerHandler)" },
   { id: "bedrock", label: "Exemplo Bedrock" },
+  { id: "loja", label: "Gerenciar a loja" },
 ];
 
 export default function ApiDocs() {
@@ -147,6 +148,10 @@ ADDON_ID=economy`}</Code>
               <li><code className="rounded bg-muted px-1">users:queue</code> — ler entregas de jogadores</li>
               <li><code className="rounded bg-muted px-1">users:schedules</code> — ler agendamentos</li>
               <li><code className="rounded bg-muted px-1">server:heartbeat</code> — enviar heartbeat</li>
+              <li><code className="rounded bg-muted px-1">categories:read</code> / <code className="rounded bg-muted px-1">categories:create</code> / <code className="rounded bg-muted px-1">categories:update</code> / <code className="rounded bg-muted px-1">categories:delete</code> — gerenciar categorias</li>
+              <li><code className="rounded bg-muted px-1">products:read</code> / <code className="rounded bg-muted px-1">products:create</code> / <code className="rounded bg-muted px-1">products:update</code> / <code className="rounded bg-muted px-1">products:delete</code> — gerenciar produtos</li>
+              <li><code className="rounded bg-muted px-1">products:publish</code> — publicar/despublicar</li>
+              <li><code className="rounded bg-muted px-1">delivery-recipes:read</code> / <code className="rounded bg-muted px-1">delivery-recipes:write</code> — receita de entrega do produto</li>
             </ul>
           </Section>
 
@@ -159,6 +164,22 @@ ADDON_ID=economy`}</Code>
               <Endpoint method="PATCH" path="/api/v1/app/command/{command-id}" scope="deliveries:update" />
               <Endpoint method="POST" path="/api/v1/app/heartbeat" scope="server:heartbeat" />
               <Endpoint method="GET" path="/api/v1/app/me" scope="—" />
+              <Endpoint method="GET" path="/api/v1/categories" scope="categories:read" />
+              <Endpoint method="POST" path="/api/v1/categories" scope="categories:create" />
+              <Endpoint method="GET" path="/api/v1/categories/{id}" scope="categories:read" />
+              <Endpoint method="PATCH" path="/api/v1/categories/{id}" scope="categories:update" />
+              <Endpoint method="DELETE" path="/api/v1/categories/{id}" scope="categories:delete" />
+              <Endpoint method="GET" path="/api/v1/products" scope="products:read" />
+              <Endpoint method="POST" path="/api/v1/products" scope="products:create" />
+              <Endpoint method="GET" path="/api/v1/products/{id}" scope="products:read" />
+              <Endpoint method="PATCH" path="/api/v1/products/{id}" scope="products:update" />
+              <Endpoint method="DELETE" path="/api/v1/products/{id}" scope="products:delete" />
+              <Endpoint method="POST" path="/api/v1/products/{id}/publish" scope="products:publish" />
+              <Endpoint method="POST" path="/api/v1/products/{id}/unpublish" scope="products:publish" />
+              <Endpoint method="GET" path="/api/v1/products/{id}/delivery-recipe" scope="delivery-recipes:read" />
+              <Endpoint method="PUT" path="/api/v1/products/{id}/delivery-recipe" scope="delivery-recipes:write" />
+              <Endpoint method="POST" path="/api/v1/files/upload-url" scope="products:create (ou update)" />
+              <Endpoint method="POST" path="/api/v1/files/finalize" scope="products:create (ou update)" />
             </div>
           </Section>
 
@@ -432,6 +453,121 @@ registerHandler("ADD_MONEY", (d, player) => {
   // chame seu banco de economia / scoreboard
   world.scoreboard.getObjective("money")?.setScore(player, d.payload.amount);
 });`}</Code>
+          </Section>
+
+          <Section id="loja" icon={KeyRound} title="Gerenciando a loja através de addons">
+            <p>
+              Os endpoints de entrega continuam iguais. Além deles, uma chave com os scopes de
+              catálogo pode criar e editar categorias e produtos — que aparecem imediatamente no
+              painel, na loja e no catálogo. É o MESMO catálogo: não existe "produto do addon"
+              separado de "produto do site".
+            </p>
+
+            <p><strong>Criar categoria</strong></p>
+            <Code title="POST /api/v1/categories">{`{
+  "name": "Kits",
+  "slug": "kits",
+  "description": "Kits do servidor",
+  "server_id": "survival-01",
+  "addon_id": "store-manager"
+}
+→ 201 { "id": "j57...", "name": "Kits", "slug": "kits", "created_at": "..." }`}</Code>
+
+            <p>
+              <strong>Listar / obter categoria</strong> — <code className="rounded bg-muted px-1">GET /api/v1/categories</code> e{" "}
+              <code className="rounded bg-muted px-1">GET /api/v1/categories/&#123;id&#125;</code> (aceita id, external_id ou slug).
+            </p>
+
+            <p><strong>Criar produto (rascunho) com receita de entrega</strong></p>
+            <Code title="POST /api/v1/products">{`{
+  "name": "Kit Guerreiro",
+  "description": "Receba o Kit Guerreiro no servidor.",
+  "price": 9.90,
+  "category_id": "j57...",
+  "external_id": "survival-kit-guerreiro",
+  "enabled": false,
+  "delivery_recipe": {
+    "version": 1,
+    "offline_execute": false,
+    "actions": [
+      { "type": "GIVE_ITEMS", "payload": { "items": [ { "type": "minecraft_item", "format_version": 1, "item": { "type_id": "minecraft:diamond_sword", "amount": 1 } } ] } },
+      { "type": "ADD_MONEY", "payload": { "amount": 5000 } }
+    ]
+  }
+}
+→ 201 { "id": "j58...", "status": "DRAFT", "external_id": "survival-kit-guerreiro", ... }`}</Code>
+
+            <p>
+              <strong>Editar a receita depois</strong> — <code className="rounded bg-muted px-1">PUT /api/v1/products/&#123;id&#125;/delivery-recipe</code>
+              (e leia com <code className="rounded bg-muted px-1">GET</code>).
+            </p>
+            <Code>{`{
+  "version": 1,
+  "offline_execute": false,
+  "actions": [
+    { "type": "ADD_RANK", "payload": { "rank": "ouro" },
+      "reverse_action": "REMOVE_RANK", "reverse_payload": { "rank": "ouro" },
+      "reverse_delay_seconds": 2592000 }
+  ]
+}`}</Code>
+
+            <p>
+              <strong>Publicar / despublicar</strong> — <code className="rounded bg-muted px-1">POST /api/v1/products/&#123;id&#125;/publish</code> e{" "}
+              <code className="rounded bg-muted px-1">/unpublish</code>. Um produto em DRAFT não aparece na loja.
+            </p>
+
+            <p>
+              <strong>Idempotência</strong>: envie <code className="rounded bg-muted px-1">external_id</code> (gerado pelo addon)
+              e/ou o header <code className="rounded bg-muted px-1">Idempotency-Key</code>. Repetir a mesma criação devolve o
+              mesmo recurso — nunca duplica.
+            </p>
+
+            <p>
+              <strong>Itens versionados</strong>: o <code className="rounded bg-muted px-1">payload</code> é livre. Para itens, use{" "}
+              <code className="rounded bg-muted px-1">&#123; "type": "minecraft_item", "format_version": 1, "item": ... &#125;</code> —
+              o addon decide quais campos preservar (nome, lore, encantamentos, durabilidade,
+              componentes). A API apenas transporta e guarda a receita.
+            </p>
+
+            <p>
+              <strong>Imagens</strong>: <code className="rounded bg-muted px-1">POST /api/v1/files/upload-url</code> → poste o
+              binário na URL devolvida → <code className="rounded bg-muted px-1">POST /api/v1/files/finalize</code> → use a{" "}
+              <code className="rounded bg-muted px-1">url</code> no campo <code className="rounded bg-muted px-1">image</code>.
+            </p>
+
+            <p>
+              <strong>SDK reutilizável</strong> (importe em qualquer addon — arquivo{" "}
+              <code className="rounded bg-muted px-1">src/lib/store-api-client.ts</code>):
+            </p>
+            <Code title="store-api-client.ts">{`const storeApi = createStoreApi({ baseUrl: "https://SEU-DOMINIO/api/v1", apiKey: "sk_live_..." });
+
+const cat = await storeApi.categories.create({ name: "Kits", external_id: "kits" }, "cat-kits-v1");
+const product = await storeApi.products.create({
+  name: "Kit Guerreiro",
+  price: 9.9,
+  category_id: cat.id,
+  external_id: "survival-kit-guerreiro",
+  delivery_recipe: { version: 1, offline_execute: false, actions: [
+    { type: "GIVE_ITEMS", payload: { items: [{ type: "minecraft_item", format_version: 1,
+        item: { type_id: "minecraft:diamond_sword", amount: 1 } }] } },
+    { type: "ADD_MONEY", payload: { amount: 5000 } },
+  ] },
+}, "product-survival-kit-guerreiro-v1");
+
+await storeApi.products.publish(product.id);
+
+// a mesma fila de sempre:
+const queue = await storeApi.deliveries.getQueue({ addon_id: "store-manager" });
+// ... executa no Minecraft ... e confirma:
+await storeApi.deliveries.complete(queue[0].id, "DONE", "Kit e moedas entregues");`}</Code>
+
+            <p>Ações registradas na auditoria do painel:</p>
+            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <span className="rounded border px-2 py-1">CATEGORY_CREATED / UPDATED</span>
+              <span className="rounded border px-2 py-1">PRODUCT_CREATED / UPDATED</span>
+              <span className="rounded border px-2 py-1">PRODUCT_PUBLISHED / UNPUBLISHED</span>
+              <span className="rounded border px-2 py-1">DELIVERY_RECIPE_UPDATED</span>
+            </div>
           </Section>
 
           <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4 text-sm">

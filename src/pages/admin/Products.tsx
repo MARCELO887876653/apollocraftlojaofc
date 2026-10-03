@@ -22,6 +22,8 @@ type Product = {
   priceCents: number; compareAtPriceCents?: number; stock: number; unlimitedStock: boolean;
   active: boolean; featured: boolean; popular: boolean; hidden: boolean;
   salesCount: number; categoryId?: string; delivery: { type: string };
+  status?: string; externalId?: string;
+  createdSource?: string; sourceServerId?: string; sourceAddonId?: string;
 };
 
 type Variant = {
@@ -310,6 +312,11 @@ export default function AdminProducts() {
                         {!p.active && <Badge variant="outline" className="ml-2">Inativo</Badge>}
                         {p.featured && <Badge variant="secondary" className="ml-2">Destaque</Badge>}
                         {p.hidden && <Badge variant="outline" className="ml-2">Oculto</Badge>}
+                        {p.createdSource === "MINECRAFT_ADDON" && (
+                          <Badge variant="outline" className="ml-2 border-sky-500/40 text-sky-400">
+                            Addon
+                          </Badge>
+                        )}
                       </button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -340,6 +347,22 @@ export default function AdminProducts() {
           <DialogHeader>
             <DialogTitle>{editing === "new" ? "Novo produto" : "Editar produto"}</DialogTitle>
           </DialogHeader>
+
+          {editing !== "new" && detail?.product?.createdSource && (
+            <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              Origem:{" "}
+              <strong>
+                {detail.product.createdSource === "MINECRAFT_ADDON"
+                  ? "Minecraft Addon"
+                  : detail.product.createdSource === "API"
+                    ? "API"
+                    : "Painel"}
+              </strong>
+              {detail.product.sourceServerId ? ` · Servidor: ${detail.product.sourceServerId}` : ""}
+              {detail.product.sourceAddonId ? ` · Addon: ${detail.product.sourceAddonId}` : ""}
+              {detail.product.status ? ` · Status: ${detail.product.status}` : ""}
+            </div>
+          )}
 
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">

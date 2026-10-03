@@ -180,6 +180,17 @@ const V1_SCOPES: Array<{ value: string; label: string }> = [
   { value: "users:queue", label: "Ler entregas de jogadores" },
   { value: "users:schedules", label: "Ler agendamentos" },
   { value: "server:heartbeat", label: "Heartbeat do servidor" },
+  { value: "categories:read", label: "Ler categorias" },
+  { value: "categories:create", label: "Criar categorias" },
+  { value: "categories:update", label: "Editar categorias" },
+  { value: "categories:delete", label: "Arquivar categorias" },
+  { value: "products:read", label: "Ler produtos" },
+  { value: "products:create", label: "Criar produtos" },
+  { value: "products:update", label: "Editar produtos" },
+  { value: "products:delete", label: "Arquivar produtos" },
+  { value: "products:publish", label: "Publicar/despublicar" },
+  { value: "delivery-recipes:read", label: "Ler receita de entrega" },
+  { value: "delivery-recipes:write", label: "Editar receita de entrega" },
 ];
 
 type ApiKeyV1 = {

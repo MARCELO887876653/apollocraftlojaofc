@@ -92,11 +92,11 @@ const apiV1 = httpAction(async (ctx, request) => {
   url.searchParams.forEach((value, k) => {
     query[k] = value;
   });
-  const bodyText =
-    request.method === "POST" || request.method === "PATCH"
-      ? await request.text()
-      : undefined;
+  const bodyText = ["POST", "PATCH", "PUT", "DELETE"].includes(request.method)
+    ? await request.text()
+    : undefined;
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
+  const idempotencyKey = request.headers.get("idempotency-key") ?? undefined;
   try {
     const result = await ctx.runAction(api.apiV1.handle, {
       method: request.method,
@@ -105,6 +105,7 @@ const apiV1 = httpAction(async (ctx, request) => {
       bodyText,
       query,
       ip,
+      idempotencyKey,
     });
     return Response.json(result.body ?? {}, {
       status: result.status,
@@ -119,7 +120,7 @@ const apiV1 = httpAction(async (ctx, request) => {
   }
 });
 
-for (const method of ["GET", "POST", "PATCH"] as const) {
+for (const method of ["GET", "POST", "PATCH", "PUT", "DELETE"] as const) {
   http.route({
     pathPrefix: "/api/v1/",
     method,

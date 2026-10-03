@@ -2,6 +2,7 @@ import { query, mutation, internalQuery, internalMutation } from "./_generated/s
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { generateDeliveryId } from "./lib/hash";
+import { deliveryV1ToRecipe } from "./lib/deliveryRecipe";
 
 // ─────────────────────────────────────────────────────────────
 // Fila de entregas automáticas (delivery_commands)
@@ -87,6 +88,8 @@ export const internalCreateForOrder = internalMutation({
       if (!product || !cfg?.enabled || !Array.isArray(cfg.actions) || cfg.actions.length === 0) {
         continue;
       }
+      // snapshot da receita no momento da compra (compras antigas não mudam)
+      const recipeSnapshot = deliveryV1ToRecipe(cfg);
       for (let j = 0; j < cfg.actions.length; j++) {
         const action = cfg.actions[j];
         if (!action?.action) continue;
@@ -116,6 +119,7 @@ export const internalCreateForOrder = internalMutation({
           action: action.action,
           command: action.command?.trim() || undefined,
           payload: action.payload ?? undefined,
+          recipeSnapshot,
           variables: [
             { name: "nickname", value: clientIdentifier },
             { name: "produto", value: item.name ?? product.name },
@@ -157,6 +161,7 @@ export const internalCreateForOrder = internalMutation({
               clientIdentifier,
               action: action.reverseAction,
               payload: action.reversePayload ?? undefined,
+              recipeSnapshot,
               variables: [
                 { name: "nickname", value: clientIdentifier },
                 { name: "produto", value: item.name ?? product.name },

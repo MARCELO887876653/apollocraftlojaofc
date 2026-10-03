@@ -6,7 +6,7 @@ import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import { CartProvider } from "@/lib/cart";
 import { ThemeProvider } from "@/lib/theme";
@@ -14,7 +14,6 @@ import { ThemeProvider } from "@/lib/theme";
 // Lazy load route components for better code splitting
 const Home = lazy(() => import("./pages/Home.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
-const Catalog = lazy(() => import("./pages/Catalog.tsx"));
 const CategoriesPage = lazy(() => import("./pages/Categories.tsx"));
 const CategoryPage = lazy(() => import("./pages/CategoryPage.tsx"));
 const ProductPage = lazy(() => import("./pages/Product.tsx"));
@@ -155,7 +154,8 @@ createRoot(document.getElementById("root")!).render(
                 <Routes>
                   {/* Loja pública */}
                   <Route path="/" element={<Home />} />
-                  <Route path="/loja" element={<Catalog />} />
+                  {/* O catálogo plano foi removido: a loja agora é navegada por categorias. */}
+                  <Route path="/loja" element={<Navigate to="/categorias" replace />} />
                   <Route path="/categorias" element={<CategoriesPage />} />
                   <Route path="/categoria/:slug" element={<CategoryPage />} />
                   <Route path="/produto/:slug" element={<ProductPage />} />

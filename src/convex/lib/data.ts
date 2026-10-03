@@ -115,7 +115,6 @@ export async function ensureDefaults(ctx: MutationCtx) {
         "menu",
         [
           { label: "Início", url: "/", newTab: false },
-          { label: "Catálogo", url: "/loja", newTab: false },
           { label: "Categorias", url: "/categorias", newTab: false },
         ],
       ],      [

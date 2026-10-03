@@ -3,7 +3,7 @@ import { useQuery } from "convex/react";
 import { motion } from "framer-motion";
 import { api } from "@/convex/_generated/api";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, Package, ShoppingCart } from "lucide-react";
+import { ArrowLeft, Package, ShoppingBasket } from "lucide-react";
 import { StoreLayout } from "@/components/store/StoreLayout";
 import { formatBRL } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -83,7 +83,7 @@ function CategoryProductCard({ product, index }: { product: Product; index: numb
               <span className="text-sm text-muted-foreground line-through">
                 {formatBRL(product.compareAtPriceCents!)}
               </span>
-              <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs font-bold text-foreground">
+              <span className="inline-flex items-center gap-1 rounded-lg bg-muted px-1.5 py-0.5 text-xs font-bold text-foreground">
                 <TrendingDownIcon /> -{discount}%
               </span>
               <span className="ml-auto flex size-8 items-center justify-center rounded-lg bg-sky-500/15 text-sky-500">
@@ -91,7 +91,7 @@ function CategoryProductCard({ product, index }: { product: Product; index: numb
               </span>
             </>
           ) : (
-            <span className="ml-auto flex size-8 items-center justify-center rounded-lg bg-sky-500/15 text-sky-500">
+            <span className="ml-auto flex size-8 items-center justify-center rounded-lg bg-teal-500/15 text-teal-400">
               <GemIcon />
             </span>
           )}
@@ -110,7 +110,7 @@ function CategoryProductCard({ product, index }: { product: Product; index: numb
               outOfStock && "pointer-events-none opacity-50",
             )}
           >
-            <ShoppingCart className="size-4.5" /> Comprar agora
+            <ShoppingBasket className="size-4.5" /> Comprar agora
           </Link>
         </div>
       </div>
@@ -152,7 +152,7 @@ export default function CategoryPage() {
 
   return (
     <StoreLayout>
-      <div className="mx-auto w-full max-w-7xl px-4 py-8">
+      <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:py-12">
         {!categories ? null : !category ? (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed p-16 text-center text-muted-foreground">
             <Package className="size-10 opacity-40" />
@@ -169,7 +169,7 @@ export default function CategoryPage() {
               >
                 <ArrowLeft className="size-5" />
               </Link>
-              <h1 className="text-3xl font-extrabold uppercase tracking-tight sm:text-5xl">
+              <h1 className="text-4xl font-extrabold uppercase tracking-tight sm:text-5xl">
                 {category.name}
               </h1>
             </div>
@@ -212,7 +212,7 @@ export default function CategoryPage() {
 
             {/* Produtos */}
             {products === undefined ? (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <div key={i} className="aspect-[3/4] animate-pulse rounded-2xl bg-muted/60" />
                 ))}
@@ -223,7 +223,7 @@ export default function CategoryPage() {
                 Nenhum produto nesta categoria ainda.
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
                 {products.map((p, i) => (
                   <CategoryProductCard key={p._id} product={p} index={i} />
                 ))}

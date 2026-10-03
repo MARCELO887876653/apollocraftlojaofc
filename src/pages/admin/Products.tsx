@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ImageUpload } from "@/components/admin/ImageUpload";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Loader2, Search, Package, ImagePlus, X, MoreVertical, GripVertical, ChevronDown } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Search, Package, ImagePlus, X, MoreVertical, GripVertical, ChevronDown, Terminal } from "lucide-react";
 
 type Product = {
   _id: string; name: string; slug: string; image?: string;
@@ -75,7 +75,13 @@ function formToData(form: any) {
     maxQty: parseInt(form.maxQty || "99", 10),
     order: parseInt(form.order || "0", 10),
     benefits: form.benefits.filter(Boolean),
-    delivery: { ...form.delivery, showToCustomer: form.delivery.showToCustomer ?? true },
+    delivery: {
+      ...form.delivery,
+      showToCustomer: form.delivery.showToCustomer ?? true,
+      commands: form.delivery.type === "command"
+        ? (form.delivery.commands ?? []).map((s: string) => s.trim()).filter(Boolean)
+        : form.delivery.commands,
+    },
     seoTitle: form.seoTitle || undefined,
     seoDescription: form.seoDescription || undefined,
   };
@@ -403,12 +409,9 @@ export default function AdminProducts() {
                   />
                 )}
                 {form.delivery.type === "command" && (
-                  <Textarea
-                    rows={2}
-                    placeholder="Comandos, um por linha (use {nick} e {produto})"
-                    value={(form.delivery.commands ?? []).join("\n")}
-                    onChange={(e) => set("delivery", { ...form.delivery, commands: e.target.value.split("\n") })}
-                  />
+                  <p className="text-xs text-muted-foreground">
+                    Os comandos são enviados ao servidor via Integrações → Minecraft quando o pagamento confirma.
+                  </p>
                 )}
                 {form.delivery.type === "message" && (
                   <Textarea
@@ -435,6 +438,91 @@ export default function AdminProducts() {
                 </label>
               </div>
             </div>
+
+            {form.delivery.type === "command" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Terminal className="size-4 text-sky-400" /> Comandos
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Configure os comandos que serão executados neste pacote.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(form.delivery.commands ?? []).length === 0 ? (
+                    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed p-8 text-center">
+                      <span className="flex size-14 items-center justify-center rounded-full bg-muted">
+                        <Terminal className="size-6 text-muted-foreground" />
+                      </span>
+                      <div>
+                        <p className="font-bold">Nenhum comando configurado</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Adicione comandos automáticos após a confirmação da compra.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={() => set("delivery", { ...form.delivery, commands: ["/kit {nick}"] })}
+                      >
+                        <Plus className="mr-2 size-4" /> Novo comando
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        {(form.delivery.commands ?? []).map((cmd: string, i: number) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+                              <Terminal className="size-4" />
+                            </span>
+                            <Input
+                              className="font-mono text-sm"
+                              placeholder="/kit {nick}"
+                              value={cmd}
+                              onChange={(e) =>
+                                set("delivery", {
+                                  ...form.delivery,
+                                  commands: (form.delivery.commands ?? []).map((c: string, j: number) => (j === i ? e.target.value : c)),
+                                })
+                              }
+                            />
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="shrink-0 text-red-600"
+                              aria-label="Remover comando"
+                              onClick={() =>
+                                set("delivery", {
+                                  ...form.delivery,
+                                  commands: (form.delivery.commands ?? []).filter((_: string, j: number) => j !== i),
+                                })
+                              }
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => set("delivery", { ...form.delivery, commands: [...(form.delivery.commands ?? []), ""] })}
+                      >
+                        <Plus className="mr-2 size-4" /> Novo comando
+                      </Button>
+                    </>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Variáveis: <code className="rounded bg-muted px-1 font-mono">{"{nick}"}</code>{" "}
+                    <code className="rounded bg-muted px-1 font-mono">{"{produto}"}</code>{" "}
+                    <code className="rounded bg-muted px-1 font-mono">{"{quantidade}"}</code>{" "}
+                    <code className="rounded bg-muted px-1 font-mono">{"{pedido}"}</code> — executados no servidor quando o jogador estiver online.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>

@@ -18,6 +18,7 @@ export const executeHttp = internalAction({
     headers: v.optional(v.array(v.object({ k: v.string(), v: v.string() }))),
     body: v.optional(v.string()),
     commands: v.optional(v.array(v.string())),
+    player: v.optional(v.string()),
     orderNumber: v.string(),
     productId: v.string(),
     productName: v.string(),
@@ -55,6 +56,7 @@ export const executeHttp = internalAction({
             productId: args.productId,
             productName: args.productName,
             target: args.target,
+            player: args.player ?? args.target,
             quantity: args.quantity,
             commands: args.commands ?? [],
           }),
@@ -63,14 +65,22 @@ export const executeHttp = internalAction({
         if (!res.ok) error = `Webhook retornou HTTP ${res.status}`;
       } else if (args.type === "command") {
         // Comandos de servidor Minecraft não são executados localmente:
-        // são despachados para o endpoint configurado pelo admin.
+        // são despachados para o endpoint configurado pelo admin
+        // (Integrações → Minecraft). O plugin do servidor decide se executa
+        // na hora (jogador online) ou enfileira até ele entrar.
         if (!args.url) {
           error = "Comando configurado mas nenhum endpoint de despacho (Integrações → Minecraft)";
         } else {
           const res = await fetch(args.url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ commands: args.commands ?? [] }),
+            body: JSON.stringify({
+              commands: args.commands ?? [],
+              player: args.player ?? args.target,
+              orderNumber: args.orderNumber,
+              productName: args.productName,
+              quantity: args.quantity,
+            }),
           });
           success = res.ok;
           if (!res.ok) error = `Endpoint de comandos retornou HTTP ${res.status}`;

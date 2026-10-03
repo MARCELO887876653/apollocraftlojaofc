@@ -1,6 +1,7 @@
 import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import { getSetting } from "./lib/data";
 
 // ─────────────────────────────────────────────────────────────
 // Fila de entrega automática (runtime padrão)
@@ -57,9 +58,14 @@ export const executeDelivery = internalMutation({
     const config = (product?.delivery ?? {}) as any;
     const placeholders: Record<string, string> = {
       "{player}": d.target ?? "",
+      "{nick}": d.target ?? "",
+      "{jogador}": d.target ?? "",
       "{quantity}": String(d.quantity),
+      "{quantidade}": String(d.quantity),
       "{order_id}": order.number,
+      "{pedido}": order.number,
       "{product_id}": d.productId,
+      "{produto}": d.productName ?? "",
     };
     const replace = (text: string) =>
       Object.entries(placeholders).reduce(
@@ -105,11 +111,18 @@ export const executeDelivery = internalMutation({
       case "command":
       case "api":
       case "webhook": {
+        // Comandos de servidor usam o endpoint de despacho configurado em
+        // Integrações → Minecraft; api/webhook usam a URL do próprio produto.
+        let url: string | undefined = config.apiUrl ? replace(config.apiUrl) : undefined;
+        if (config.type === "command" && !url) {
+          const mc = (await getSetting(ctx, "integration_minecraft")) as any;
+          url = mc?.dispatchUrl || undefined;
+        }
         // executa via action Node (HTTP externo)
         await ctx.scheduler.runAfter(0, internal.deliveries.executeHttp, {
           deliveryId,
           type: config.type,
-          url: config.apiUrl ? replace(config.apiUrl) : undefined,
+          url,
           method: config.apiMethod ?? "POST",
           headers: (config.apiHeaders ?? []).map((h: any) => ({ k: h.k, v: replace(h.v) })),
           body: config.apiBody ? replace(config.apiBody) : undefined,

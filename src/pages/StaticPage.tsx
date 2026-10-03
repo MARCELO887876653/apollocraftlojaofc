@@ -4,7 +4,7 @@ import { api } from "@/convex/_generated/api";
 import { StoreLayout } from "@/components/store/StoreLayout";
 import { formatDateOnly } from "@/lib/format";
 import { Button } from "@/components/ui/button";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, ShieldCheck } from "lucide-react";
 
 function BlogIndex() {
   const posts = useQuery(api.content.listPublishedPosts, { limit: 30 }) as any[] | undefined;
@@ -75,11 +75,79 @@ function BlogPost({ slug }: { slug: string }) {
   );
 }
 
+/**
+ * Renderizador leve para o conteúdo das páginas institucionais.
+ * Suporta: ## / ### títulos, - listas, > destaques e --- separadores.
+ */
+function RichContent({ content }: { content: string }) {
+  const lines = content.split("\n");
+  const blocks: React.ReactNode[] = [];
+  let list: string[] = [];
+
+  const flushList = () => {
+    if (list.length === 0) return;
+    blocks.push(
+      <ul key={`ul-${blocks.length}`} className="my-4 space-y-2">
+        {list.map((item, i) => (
+          <li key={i} className="flex gap-2.5 leading-relaxed">
+            <span className="mt-[9px] size-1.5 shrink-0 rounded-full bg-sky-400" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>,
+    );
+    list = [];
+  };
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (line.startsWith("- ")) {
+      list.push(line.slice(2));
+      continue;
+    }
+    flushList();
+    if (!line.trim()) continue;
+    if (line === "---") {
+      blocks.push(<hr key={`hr-${blocks.length}`} className="my-8 border-border" />);
+    } else if (line.startsWith("> ")) {
+      blocks.push(
+        <div
+          key={`q-${blocks.length}`}
+          className="my-5 rounded-2xl border border-sky-500/25 bg-sky-500/5 px-5 py-4 text-[15px] font-semibold leading-relaxed"
+        >
+          {line.slice(2)}
+        </div>,
+      );
+    } else if (line.startsWith("### ")) {
+      blocks.push(
+        <h3 key={`h3-${blocks.length}`} className="mt-7 text-lg font-extrabold tracking-tight">
+          {line.slice(4)}
+        </h3>,
+      );
+    } else if (line.startsWith("## ")) {
+      blocks.push(
+        <h2 key={`h2-${blocks.length}`} className="mt-9 text-xl font-extrabold uppercase tracking-tight first:mt-0">
+          {line.slice(3)}
+        </h2>,
+      );
+    } else {
+      blocks.push(
+        <p key={`p-${blocks.length}`} className="my-3 leading-relaxed">
+          {line}
+        </p>,
+      );
+    }
+  }
+  flushList();
+
+  return <div className="text-[15px] text-muted-foreground sm:text-base">{blocks}</div>;
+}
+
 function InstitutionalPage({ slug }: { slug: string }) {
   const page = useQuery(api.content.getPageBySlug, { slug }) as any | null | undefined;
   return (
     <StoreLayout>
-      <div className="mx-auto w-full max-w-3xl px-4 py-10">
+      <div className="mx-auto w-full max-w-3xl px-4 py-10 sm:py-14">
         {page === undefined && <div className="h-64 animate-pulse rounded-xl bg-muted" />}
         {page === null && (
           <div className="py-24 text-center">
@@ -89,9 +157,17 @@ function InstitutionalPage({ slug }: { slug: string }) {
         )}
         {page && (
           <>
-            <h1 className="text-3xl font-extrabold tracking-tight">{page.title}</h1>
-            <div className="mt-6 whitespace-pre-wrap leading-relaxed text-muted-foreground">
-              {page.content}
+            <div className="rounded-3xl border bg-card p-6 sm:p-10">
+              <span className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3 py-1 text-xs font-semibold text-muted-foreground">
+                <ShieldCheck className="size-3.5 text-sky-400" /> Apollo Craft
+              </span>
+              <h1 className="mt-4 text-3xl font-extrabold tracking-tight sm:text-4xl">{page.title}</h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Última atualização: {formatDateOnly(page.updatedAt ?? page.createdAt)}
+              </p>
+              <div className="mt-8">
+                <RichContent content={page.content} />
+              </div>
             </div>
           </>
         )}

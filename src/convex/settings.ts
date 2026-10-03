@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { getSetting, setSetting, DEFAULT_STORE, DEFAULT_THEME, DEFAULT_HOMEPAGE } from "./lib/data";
+import { DEFAULT_PAGES } from "./lib/defaultPages";
 
 /**
  * Migration idempotente: garante Apollo Craft + tema azul/navy. Só preenche o
@@ -40,6 +41,26 @@ export const applyBrandDefaults = internalMutation({
         { id: "faq", type: "faq", enabled: wasEnabled("faq"), config: { title: "Perguntas frequentes" } },
       ]);
       await setSetting(ctx, "homepageCentralCartV2", { done: true });
+    }
+
+    // Páginas institucionais: cria Termos de Serviço e Privacidade se ainda
+    // não existirem (não sobrescreve páginas já criadas/editadas pelo admin).
+    for (const page of DEFAULT_PAGES) {
+      const existing = await ctx.db
+        .query("pages")
+        .withIndex("by_slug", (q) => q.eq("slug", page.slug))
+        .first();
+      if (!existing) {
+        const now = Date.now();
+        await ctx.db.insert("pages", {
+          title: page.title,
+          slug: page.slug,
+          content: page.content,
+          active: true,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     }
 
     // store

@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Loader2, CheckCircle2, XCircle, CreditCard, Gamepad2, KeyRound, Copy,
-  Plus, Trash2, BookMarked, Terminal, RefreshCw, Server, ShieldCheck, Ban,
+  Plus, Trash2, RefreshCw, Server, ShieldCheck, Ban,
 } from "lucide-react";
 
 type Integrations = {
@@ -23,11 +23,6 @@ type Integrations = {
     hasAccessToken: boolean; hasWebhookSecret: boolean;
   };
   minecraft: { dispatchUrl: string; serverName: string };
-};
-
-type ApiKey = {
-  _id: string; name: string; prefix: string; active: boolean;
-  lastUsedAt?: number; createdAt: number; createdBy?: string;
 };
 
 export default function AdminIntegrations() {
@@ -170,181 +165,10 @@ export default function AdminIntegrations() {
 
       <ApiV1Section />
 
-      <ApiKeysSection />
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Chaves de API para integrações externas (entrega na loja)
-// ─────────────────────────────────────────────────────────────
-
-function ApiKeysSection() {
-  const keys = useQuery(api.apiKeys.list) as ApiKey[] | undefined;
-  const createKey = useMutation(api.apiKeys.create);
-  const setActive = useMutation(api.apiKeys.setActive);
-  const removeKey = useMutation(api.apiKeys.remove);
-
-  const [name, setName] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [newKey, setNewKey] = useState<string | null>(null);
-
-  const create = async () => {
-    if (!name.trim()) return toast.error("Dê um nome para a chave (ex.: Plugin do servidor)");
-    setCreating(true);
-    try {
-      const res = await createKey({ name });
-      setNewKey(res.key);
-      setName("");
-      toast.success("Chave criada — copie agora, ela só é exibida uma vez!");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Erro");
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <KeyRound className="size-5 text-primary" />
-          <CardTitle className="text-base">Chaves de API (integrações externas)</CardTitle>
-        </div>
-        <CardDescription>
-          Sistemas externos (plugin do servidor, bot do Discord, painéis parceiros) usam a chave para
-          consultar pedidos pagos e registrar entregas na loja automaticamente — como o MineCraGate.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        {/* Criar chave */}
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nome da integração (ex.: Servidor MinasCraft)"
-            onKeyDown={(e) => e.key === "Enter" && create()}
-          />
-          <Button onClick={create} disabled={creating} className="shrink-0">
-            {creating ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
-            Gerar chave
-          </Button>
-        </div>
-
-        {/* Chave recém-criada */}
-        {newKey && (
-          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4">
-            <p className="flex items-center gap-2 text-sm font-semibold text-emerald-700">
-              <KeyRound className="size-4" /> Copie sua chave agora — ela não será exibida novamente
-            </p>
-            <div className="mt-3 flex gap-2">
-              <code className="flex-1 truncate rounded-lg border bg-background px-3 py-2 text-xs">{newKey}</code>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(newKey);
-                  toast.success("Chave copiada!");
-                }}
-              >
-                <Copy className="mr-1.5 size-3.5" /> Copiar
-              </Button>
-            </div>
-          </div>
-        )}
-
-        <Separator />
-
-        {/* Lista de chaves */}
-        {keys === undefined ? (
-          <Loader2 className="mx-auto size-5 animate-spin" />
-        ) : keys.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">
-            Nenhuma chave criada ainda.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {keys.map((k) => (
-              <div key={k._id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2.5">
-                <Terminal className="size-4 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{k.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {k.prefix}••••••••  ·  criada em {new Date(k.createdAt).toLocaleDateString("pt-BR")}
-                    {k.lastUsedAt ? `  ·  último uso ${new Date(k.lastUsedAt).toLocaleDateString("pt-BR")}` : "  ·  nunca usada"}
-                  </p>
-                </div>
-                <Badge
-                  className={
-                    k.active
-                      ? "bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/15"
-                      : "bg-zinc-500/15 text-zinc-600 hover:bg-zinc-500/15"
-                  }
-                >
-                  {k.active ? "Ativa" : "Inativa"}
-                </Badge>
-                <div className="flex items-center gap-1.5">
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Switch checked={k.active} onCheckedChange={(v) => setActive({ id: k._id as any, active: v }).catch((e) => toast.error(e.message))} />
-                  </label>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 text-red-600"
-                    aria-label="Excluir chave"
-                    onClick={async () => {
-                      if (!confirm(`Excluir a chave "${k.name}"? Integrações que a usam vão parar de funcionar.`)) return;
-                      try {
-                        await removeKey({ id: k._id as any });
-                        toast.success("Chave excluída");
-                      } catch (e) {
-                        toast.error(e instanceof Error ? e.message : "Erro");
-                      }
-                    }}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <Separator />
-
-        {/* Documentação rápida */}
-        <div>
-          <p className="flex items-center gap-2 text-sm font-semibold">
-            <BookMarked className="size-4 text-primary" /> Como integrar (documentação rápida)
-          </p>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            Envie a chave no header <code className="rounded bg-muted px-1">Authorization: Bearer SUA_CHAVE</code> (ou{" "}
-            <code className="rounded bg-muted px-1">X-Api-Key</code>). Base URL:{" "}
-            <code className="rounded bg-muted px-1">{origin}/api/external</code>
-          </p>
-          <pre className="mt-3 overflow-x-auto rounded-lg border bg-muted/40 p-3 text-[11px] leading-relaxed">
-{`# 1) Validar a chave
-GET  ${origin}/api/external/me
-
-# 2) Listar pedidos pagos com entregas pendentes
-GET  ${origin}/api/external/orders/pending
-→ [{ orderNumber, minecraftNick, items: [{ productId, productName, quantity, target }] }]
-
-# 3) Registrar entrega (após executar os comandos no servidor)
-POST ${origin}/api/external/deliveries
-{ "orderNumber": "#ABC123XY", "productId": "j...", "commands": ["lp user ... permission set vip"] }
-
-# 4) Reportar falha (a loja agenda retentativa automática)
-POST ${origin}/api/external/deliveries/failed
-{ "orderNumber": "#ABC123XY", "productId": "j...", "error": "jogador offline" }`}
-          </pre>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────
 // API v1 — chaves com permissões (scopes), servidor e token 1x

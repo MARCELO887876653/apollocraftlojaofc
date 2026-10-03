@@ -19,17 +19,18 @@ export const applyBrandDefaults = internalMutation({
       oldBackgrounds: ["#ffffff", "#0b0d12", "#0a0c10", "#0a0b10"],
     };
 
-    // homepage: se ainda tiver a ordem antiga (sem "server"/"top3" como seções
-    // renderizáveis), adota a nova ordem estilo CentralCart, preservando o estado
-    // enabled de cada seção que já existia.
+    // homepage: adota a ordem final estilo CentralCart (hero → categorias →
+    // benefícios → servidor → top3 → faq), SEM seções de produtos. Executa uma
+    // única vez (flag), preservando o estado enabled das seções existentes;
+    // depois o admin pode reorganizar livremente, inclusive readicionar seções
+    // de produtos pelo painel.
     const homepage = (await getSetting(ctx, "homepage")) as any[] | null;
-    if (
-      Array.isArray(homepage) &&
-      !homepage.some((s: any) => s?.type === "server") &&
-      !homepage.some((s: any) => s?.type === "top3")
-    ) {
+    const homepageFlag = await getSetting(ctx, "homepageCentralCartV2");
+    if (!homepageFlag) {
       const wasEnabled = (type: string) =>
-        homepage.find((s: any) => s?.type === type)?.enabled ?? true;
+        Array.isArray(homepage)
+          ? homepage.find((s: any) => s?.type === type)?.enabled ?? true
+          : true;
       await setSetting(ctx, "homepage", [
         { id: "hero", type: "hero", enabled: wasEnabled("hero"), config: {} },
         { id: "categories", type: "categories", enabled: wasEnabled("categories"), config: {} },
@@ -37,8 +38,8 @@ export const applyBrandDefaults = internalMutation({
         { id: "server", type: "server", enabled: true, config: {} },
         { id: "top3", type: "top3", enabled: true, config: { title: "Top 3 compradores" } },
         { id: "faq", type: "faq", enabled: wasEnabled("faq"), config: { title: "Perguntas frequentes" } },
-        ...homepage.filter((s: any) => !['hero', 'categories', 'benefits', 'faq'].includes(s?.type)),
       ]);
+      await setSetting(ctx, "homepageCentralCartV2", { done: true });
     }
 
     // store

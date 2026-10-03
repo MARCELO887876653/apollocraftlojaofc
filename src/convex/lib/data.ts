@@ -104,10 +104,6 @@ export const DEFAULT_HOMEPAGE = [
   { id: "server", type: "server", enabled: true, config: {} },
   { id: "top3", type: "top3", enabled: true, config: { title: "Top 3 compradores" } },
   { id: "faq", type: "faq", enabled: true, config: { title: "Perguntas frequentes" } },
-  { id: "featured", type: "featured", enabled: true, config: { title: "Produtos em destaque", count: 8 } },
-  { id: "promo", type: "promo", enabled: true, config: { title: "Promoções", count: 4 } },
-  { id: "popular", type: "popular", enabled: true, config: { title: "Mais vendidos", count: 8 } },
-  { id: "new", type: "new", enabled: true, config: { title: "Lançamentos", count: 4 } },
 ];
 
 /** Garante que as configurações existam (idempotente). */

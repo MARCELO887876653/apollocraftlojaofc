@@ -1,118 +1,94 @@
 import {
-  internalQuery,
   internalMutation,
   query,
   mutation,
 } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
+import { deliveryCommandStatusValidator, apiScopeValidator } from "./lib/apiSchema";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // ─────────────────────────────────────────────────────────────
-// Fila de entrega da API v1 (deliveryCommands)
-// - Criação idempotente no pagamento aprovado (idempotencyKey UNIQUE)
-// - Cancelamento em reembolso/cancelamento do pedido
-// - Lease/claim p/ evitar duas instâncias processando a mesma entrega
+// Fila de entrega da API v1 (delivery_commands)
+//
+//  PENDING  → aguardando execução
+//  PROCESSING → reservada (claim) — lease de 5 min
+//  DONE     → executada com sucesso
+//  FAILED   → tentativa falhou (tentativas máximas esgotadas)
+//  CANCELED → cancelada (reembolso/cancelamento do pedido)
 // ─────────────────────────────────────────────────────────────
 
-const CLAIM_TTL_MS = 5 * 60 * 1000; // lease de 5 minutos
-
-/** Lookup por chave de idempotência (usado por auth e testes). */
-export const internalGetByKey = internalQuery({
-  args: { idempotencyKey: v.string() },
-  handler: async (ctx, { idempotencyKey }) => {
-    return await ctx.db
-      .query("deliveryCommands")
-      .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idempotencyKey))
-      .first();
-  },
-});
+const CLAIM_TTL_MS = 5 * 60 * 1000; // lease para o addon
 
 /**
- * Cria as entregas automáticas de um pedido PAGO no sistema v1.
+ * Escuta as entregas para um pedido, criando-as na fila v1.
  * Idempotente: cada (orderId, itemIndex, actionIndex) gera no máximo uma
- * entrega — um segundo pagamento/call não duplica.
+ * entrega.
  * Chamada somente após pedido realmente pago (gateway/admin).
  */
-const isEligible = (paymentStatus?: string) => paymentStatus === "paid";
-
-async function createForOrder(ctx: any, orderId: any) {
-  const order: any = await ctx.db.get(orderId);
-  if (!order || !isEligible(order.paymentStatus)) return { created: 0 };
-  if (!order.items?.length) return { created: 0 };
-
-  // cliente já existe (fluxo de checkout cria o customer)
-  const customer: any = order.customerId ? await ctx.db.get(order.customerId) : null;
-  const clientIdentifier =
-    order.minecraftNick || customer?.minecraftNick || order.discord ||
-    customer?.name || order.customerName || order.customerEmail;
-  const variables = [
-    { name: "nickname", value: order.minecraftNick ?? clientIdentifier },
-    { name: "email", value: order.customerEmail ?? "" },
-    { name: "discord", value: order.discord ?? "" },
-  ].filter((v: any) => v.value);
-
-  let created = 0;
-  for (let itemIndex = 0; itemIndex < order.items.length; itemIndex++) {
-    const item = order.items[itemIndex];
-    const product: any = await ctx.db.get(item.productId);
-    if (!product) continue;
-    const actions: any[] = product.deliveryV1?.actions ?? [];
-    if (!product.deliveryV1?.enabled || actions.length === 0) continue;
-
-    for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
-      const a = actions[actionIndex];
-      const idempotencyKey = `${orderId}:${itemIndex}:${actionIndex}`;
-      const existing = await ctx.db
-        .query("deliveryCommands")
-        .withIndex("by_idempotency", (q: any) => q.eq("idempotencyKey", idempotencyKey))
-        .first();
-      if (existing) continue; // já criada — nunca duplica
-
-      const now = Date.now();
-      await ctx.db.insert("deliveryCommands", {
-        orderId: order._id,
-        orderNumber: order.number,
-        orderItemIndex: itemIndex,
-        productId: product._id,
-        productName: product.name,
-        quantity: item.quantity,
-        serverId: a.serverId || "GLOBAL",
-        addonId: a.addonId || "custom",
-        clientIdentifier,
-        action: a.action,
-        command: a.command,
-        payload: a.payload,
-        variables,
-        offlineExecute: a.offlineExecute ?? false,
-        executeAt: now + (a.delaySeconds ?? 0) * 1000,
-        status: "PENDING",
-        attempts: 0,
-        maxAttempts: 10,
-        idempotencyKey,
-        createdAt: now,
-        updatedAt: now,
-      });
-      created++;
-    }
-  }
-  return { created };
-}
-
-/** Filas antigas de produtos sem deliveryV1 continuam no sistema anterior. */
 export const createCommandsForOrder = internalMutation({
   args: { orderId: v.id("orders") },
   handler: async (ctx, { orderId }) => {
-    const res: any = await createForOrder(ctx, orderId);
-    return res;
+    const order: any = await ctx.db.get(orderId);
+    if (!(order?.paymentStatus === "paid")) return { created: 0, skipped: 0 };
+    if (!order?.items?.length) return { created: 0, skipped: 0 };
+
+    const customer: any = order.customerId ? await ctx.db.get(order.customerId) : null;
+    const oldClientIdentifier = order.minecraftNick || customer?.minecraftNick || order.discord || customer?.name || order.customerName || order.customerEmail;
+    const oldVariables = [
+      { name: "nickname", value: order.minecraftNick ?? oldClientIdentifier },
+      { name: "email", value: order.customerEmail ?? "" },
+      { name: "discord", value: order.discord ?? "" },
+    ].filter((v: any) => v.value);
+
+    let created = 0;
+    for (let itemIndex = 0; itemIndex < order.items.length; itemIndex++) {
+      const item = order.items[itemIndex];
+      const product: any = await ctx.db.get(item.productId);
+      if (!product?.deliveryV1?.enabled) continue;
+
+      for (let actionIndex = 0; actionIndex < product.deliveryV1.actions.length; actionIndex++) {
+        const a = product.deliveryV1.actions[actionIndex];
+        const idempotencyKey = `${orderId}:${itemIndex}:${actionIndex}`;
+        const already = await ctx.db
+          .query("deliveryCommands")
+          .withIndex("by_idempotency", (q: any) => q.eq("idempotencyKey", idempotencyKey))
+          .first();
+        if (already) continue;
+
+        const now = Date.now();
+        await ctx.db.insert("deliveryCommands", {
+          orderId: order._id,
+          orderNumber: order.number,
+          orderItemIndex: itemIndex,
+          productId: product._id,
+          productName: product.name,
+          quantity: item.quantity,
+          serverId: a.serverId || "GLOBAL",
+          addonId: a.addonId || "custom",
+          clientIdentifier: oldClientIdentifier,
+          action: a.action,
+          command: a.command,
+          payload: a.payload,
+          variables: a.variables ?? (a.command ? [{ name: "command", value: a.command }] : oldVariables),
+          offlineExecute: a.offlineExecute ?? false,
+          executeAt: now + (a.delaySeconds ?? 0) * 1000,
+          status: "PENDING",
+          attempts: 0,
+          maxAttempts: 10,
+          idempotencyKey,
+          createdAt: now,
+          updatedAt: now,
+        });
+        created++;
+      }
+    }
+    return { created, skipped: 0 };
   },
 });
 
-/**
- * Reembolso/cancelamento: cancela entregas PENDING/PROCESSING do pedido.
- * DONE permanece — reversão automática só quando o produto define reverseAction.
- */
+/** Cancela (reembolso/cancelamento do pedido) antes da entrega. */
 export const cancelCommandsForOrder = internalMutation({
   args: { orderId: v.id("orders") },
   handler: async (ctx, { orderId }) => {
@@ -125,7 +101,7 @@ export const cancelCommandsForOrder = internalMutation({
       if (c.status === "PENDING" || c.status === "PROCESSING") {
         await ctx.db.patch(c._id, {
           status: "CANCELED",
-          reason: "Pedido cancelado/reembolsado",
+          reason: "Pedido cancelado ou reembolsado",
           updatedAt: Date.now(),
         });
         canceled++;
@@ -135,56 +111,45 @@ export const cancelCommandsForOrder = internalMutation({
   },
 });
 
-/** Reversão configurada no produto (REMOVE_RANK etc.) em reembolso de entrega DONE. */
+/** Reversão configurada no produto (REMOVE_RANK etc.) em reembolso de DONE. */
 export const createReverseCommandsForOrder = internalMutation({
   args: { orderId: v.id("orders") },
   handler: async (ctx, { orderId }) => {
     const order: any = await ctx.db.get(orderId);
     if (!order) return { created: 0 };
-    let created = 0;
-    for (let itemIndex = 0; itemIndex < order.items.length; itemIndex++) {
-      const item = order.items[itemIndex];
-      const product: any = await ctx.db.get(item.productId);
-      const rev = product?.deliveryV1?.reverseAction;
-      if (!rev?.action) continue;
-      const idempotencyKey = `${orderId}:rev:${itemIndex}`;
-      const existing = await ctx.db
-        .query("deliveryCommands")
-        .withIndex("by_idempotency", (q: any) => q.eq("idempotencyKey", idempotencyKey))
-        .first();
-      if (existing) continue;
-      const now = Date.now();
-      await ctx.db.insert("deliveryCommands", {
-        orderId: order._id,
-        orderNumber: order.number,
-        orderItemIndex: itemIndex,
-        productId: product._id,
-        productName: product.name,
-        quantity: item.quantity,
-        serverId: rev.serverId || product.deliveryV1?.actions?.[0]?.serverId || "GLOBAL",
-        addonId: rev.addonId || "custom",
-        clientIdentifier: order.minecraftNick || order.customerName || order.customerEmail,
-        action: rev.action,
-        payload: rev.payload,
-        variables: undefined,
-        offlineExecute: true,
-        executeAt: now,
-        status: "PENDING",
-        attempts: 0,
-        maxAttempts: 10,
-        idempotencyKey,
-        createdAt: now,
-        updatedAt: now,
-      });
-      created++;
-    }
-    return { created };
+    const product: any = await ctx.db.get(order.items?.[0]?.productId);
+    const rev = product?.deliveryV1?.reverseAction;
+    if (!rev?.action) return { created: 0 };
+    const idempotencyKey = `${orderId}:reverse:${Date.now()}`;
+    const now = Date.now();
+    const cmd = await ctx.db.insert("deliveryCommands", {
+      orderId: order._id,
+      orderNumber: order.number,
+      orderItemIndex: 0,
+      productId: product?._id,
+      productName: product?.name,
+      quantity: 1,
+      serverId: rev.serverId || "GLOBAL",
+      addonId: rev.addonId || "custom",
+      clientIdentifier: order.minecraftNick || order.customerName || order.customerEmail,
+      action: rev.action,
+      payload: rev.payload,
+      variables: undefined,
+      offlineExecute: true,
+      executeAt: now,
+      status: "PENDING",
+      attempts: 0,
+      maxAttempts: 10,
+      idempotencyKey,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { created: 1, deliveryId: cmd };
   },
 });
 
-// ─── Leitura das filas (por chave autenticada) ───
-
-export const internalListQueued = internalQuery({
+/** Auditório: lista pendentes elegíveis (usado por claim + debug). */
+export const internalListQueued = internalMutation({
   args: {
     now: v.number(),
     serverId: v.string(),
@@ -192,12 +157,12 @@ export const internalListQueued = internalQuery({
     limit: v.number(),
   },
   handler: async (ctx, { now, serverId, addonId, limit }) => {
-    const global = await ctx.db
+    const pending = await ctx.db
       .query("deliveryCommands")
       .withIndex("by_status_executeAt", (q: any) => q.eq("status", "PENDING"))
       .order("asc")
-      .take(400);
-    return global
+      .take(500);
+    return pending
       .filter((c: any) => c.executeAt <= now)
       .filter((c: any) => c.serverId === "GLOBAL" || c.serverId === serverId)
       .filter((c: any) => !addonId || c.addonId === addonId)
@@ -208,6 +173,16 @@ export const internalListQueued = internalQuery({
 export const internalGetCommand = internalQuery({
   args: { id: v.id("deliveryCommands") },
   handler: async (ctx, { id }) => await ctx.db.get(id),
+});
+
+export const internalListAttempts = internalQuery({
+  args: { deliveryId: v.id("deliveryCommands") },
+  handler: async (ctx, { deliveryId }) => {
+    return await ctx.db
+      .query("deliveryAttempts")
+      .withIndex("by_delivery", (q: any) => q.eq("deliveryId", deliveryId))
+      .collect();
+  },
 });
 
 export const internalUserQueue = internalQuery({
@@ -225,8 +200,17 @@ export const internalUserQueue = internalQuery({
     return all
       .filter((c: any) => c.status === "PENDING")
       .filter((c: any) => c.serverId === "GLOBAL" || c.serverId === serverId)
-      .filter((c: any) => !includeScheduled || c.executeAt > now)
-      .filter((c: any) => includeScheduled || c.executeAt <= now);
+      .filter((c: any) => includeScheduled || c.executeAt <= now && c.executeAt > 0);
+  },
+});
+
+export const internalListAttempts = internalQuery({
+  args: { deliveryId: v.id("deliveryCommands") },
+  handler: async (ctx, { deliveryId }) => {
+    return await ctx.db
+      .query("deliveryAttempts")
+      .withIndex("by_delivery", (q: any) => q.eq("deliveryId", deliveryId))
+      .collect();
   },
 });
 
@@ -262,13 +246,13 @@ export const adminList = query({
     if (search) {
       const s = search.toLowerCase();
       list = list.filter((c: any) =>
-        c.orderNumber?.toLowerCase().includes(s) ||
-        c.clientIdentifier?.toLowerCase().includes(s) ||
-        c.productName?.toLowerCase().includes(s) ||
-        c.action?.toLowerCase().includes(s));
+        [c.orderNumber, c.clientIdentifier, c.productName, c.action]
+          .map((x: string | undefined) => x?.toLowerCase() ?? "")
+          .some((s2: string) => s2.includes(s)),
+      );
     }
-    const counts = { PENDING: 0, PROCESSING: 0, DONE: 0, FAILED: 0, CANCELED: 0 };
-    for (const c of list) counts[c.status as keyof typeof counts]++;
+    const counts: Record<string, number> = { PENDING: 0, PROCESSING: 0, DONE: 0, FAILED: 0, CANCELED: 0 };
+    for (const c of list) counts[c.status as keyof typeof counts] = (counts[c.status as keyof typeof counts] ?? 0) + 1;
     return { items: list, counts };
   },
 });
@@ -277,32 +261,34 @@ export const adminGet = query({
   args: { id: v.id("deliveryCommands") },
   handler: async (ctx, { id }) => {
     await requireAdmin(ctx, "deliveries.view");
-    const cmd = await ctx.db.get(id);
+    const cmd: any = await ctx.db.get(id);
     if (!cmd) return null;
-    const attempts = await ctx.db
-      .query("deliveryAttempts")
-      .withIndex("by_delivery", (q: any) => q.eq("deliveryId", id))
-      .collect();
-    return { cmd, attempts };
+    return {
+      cmd,
+      attempts: await ctx.db
+        .query("deliveryAttempts")
+        .withIndex("by_delivery", (q: any) => q.eq("deliveryId", id))
+        .collect(),
+    };
   },
 });
 
-/** Reenvio manual: FAILED → PENDING (preserva tentativas). DONE exige force. */
 export const adminRetry = mutation({
   args: { id: v.id("deliveryCommands"), force: v.optional(v.boolean()) },
   handler: async (ctx, { id, force }) => {
     const admin = await requireAdmin(ctx, "deliveries.manage");
     const cmd: any = await ctx.db.get(id);
     if (!cmd) throw new Error("Entrega não encontrada");
-    if (cmd.status === "DONE" && !force)
-      throw new Error("Entrega já concluída — reenvio exige confirmação explícita (risco de duplicar)");
+    if (cmd.status === "DONE" && !force) {
+      throw new Error("Entrega concluída — reenvio exige confirmação explícita (risco de duplicar)");
+    }
     const now = Date.now();
     await ctx.db.patch(id, {
       status: "PENDING",
       claimedBy: undefined,
       claimedAt: undefined,
       claimExpiresAt: undefined,
-      executeAt: now,
+      executeAt: now + 60_000,
       updatedAt: now,
     });
     await ctx.db.insert("deliveryAttempts", {
@@ -325,10 +311,13 @@ export const adminCancel = mutation({
     const cmd: any = await ctx.db.get(id);
     if (!cmd) throw new Error("Entrega não encontrada");
     if (cmd.status === "DONE" && cmd.status !== "CANCELED") {
-      // DONE não pode ser cancelado sem reversão configurada — mantém integridade
       throw new Error("Entrega DONE não pode ser cancelada");
     }
-    await ctx.db.patch(id, { status: "CANCELED", reason: "Cancelada no painel", updatedAt: Date.now() });
+    await ctx.db.patch(id, {
+      status: "CANCELED",
+      reason: "Cancelada no painel",
+      updatedAt: Date.now(),
+    });
     await logAudit(ctx, admin, "delivery.cancel", "deliveryCommands", id);
   },
 });

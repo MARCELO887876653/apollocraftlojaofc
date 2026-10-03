@@ -4,12 +4,12 @@ import { v } from "convex/values";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // ─────────────────────────────────────────────────────────────
-// Operações atômicas da API v1 (executadas via ctx.runMutation)
+// Operações atômicas da API v1
 // ─────────────────────────────────────────────────────────────
 
 const CLAIM_TTL_MS = 5 * 60 * 1000;
 
-/** Rate limit por chave+método. Janela deslizante de 60s. */
+/** Rate limit por chave+método: janela deslizante de 60s. */
 export const checkRateLimit = internalQuery({
   args: { keyId: v.id("apiKeysV1"), method: v.string(), maxPerMinute: v.number() },
   handler: async (ctx, { keyId, method, maxPerMinute }) => {
@@ -20,12 +20,13 @@ export const checkRateLimit = internalQuery({
       .first();
     const now = Date.now();
     if (!doc || now - doc.windowStart > 60_000) {
-      return { allowed: true, remaining: maxPerMinute - 1 };
+      return { allowed: true, remaining: maxPerMinute - 1, retryAfter: undefined };
     }
+    const retryAt = doc.windowStart + 60_000;
     return {
       allowed: doc.count < maxPerMinute,
       remaining: Math.max(0, maxPerMinute - doc.count - 1),
-      retryAfter: Math.ceil((doc.windowStart + 60_000 - now) / 1000),
+      retryAfter: Math.ceil((retryAt - now) / 1000),
     };
   },
 });
@@ -54,9 +55,9 @@ export const internalGetCommand = internalQuery({
 });
 
 /**
- * Claim atômico: marca N entregas PENDING e elegíveis como PROCESSING
- * para esta instância (lease). Duas chamadas concorrentes nunca pegam
- * a mesma entrega — a segunda só vê as que restaram.
+ * Reserva atomicamente entregas PENDING para uma instância do addon.
+ * Retorna claim_token + expiração (5 min). Duas chamadas concorrentes
+ * nunca pegam a mesma entrega; a queda do addon libera a lease.
  */
 export const claimCommands = internalMutation({
   args: {
@@ -68,7 +69,6 @@ export const claimCommands = internalMutation({
   },
   handler: async (ctx, { keyId, serverId, addonId, limit, claimToken }) => {
     const now = Date.now();
-    // libera leases expirados
     const stale = await ctx.db
       .query("deliveryCommands")
       .withIndex("by_status_executeAt", (q: any) => q.eq("status", "PROCESSING"))
@@ -108,7 +108,7 @@ export const claimCommands = internalMutation({
       await ctx.db.insert("deliveryAttempts", {
         deliveryId: c._id,
         apiKeyId: keyId,
-        serverId: serverId,
+        serverId,
         addonId: c.addonId,
         status: "CLAIM",
         response: claimToken,
@@ -121,7 +121,7 @@ export const claimCommands = internalMutation({
   },
 });
 
-/** Libera entregas PROCESSING cujo lease expirou de volta para PENDING. */
+/** Libera leases expirados (addon caiu durante PROCESSING). */
 export const releaseExpiredClaims = internalMutation({
   args: {},
   handler: async (ctx) => {
@@ -153,7 +153,7 @@ export const confirmCommand = internalMutation({
     id: v.id("deliveryCommands"),
     apiKeyId: v.id("apiKeysV1"),
     serverId: v.string(),
-    status: v.string(), // DONE | FAILED | PENDING | CANCELED
+    status: v.string(),
     response: v.optional(v.string()),
     reason: v.optional(v.string()),
     ip: v.optional(v.string()),
@@ -161,16 +161,15 @@ export const confirmCommand = internalMutation({
   handler: async (ctx, { id, apiKeyId, serverId, status, response, reason, ip }) => {
     const c: any = await ctx.db.get(id);
     if (!c) return { ok: false, code: "NOT_FOUND" };
-    // servidor GLOBAL aceita qualquer chave autorizada; senão só a dona
     if (c.serverId !== "GLOBAL" && c.serverId !== serverId) {
       return { ok: false, code: "FORBIDDEN" };
     }
     if (c.status === "CANCELED" && status !== "CANCELED") {
       return { ok: false, code: "ALREADY_CANCELED" };
     }
-    const now = Date.now();
     const valid = ["DONE", "FAILED", "PENDING", "CANCELED"];
     if (!valid.includes(status)) return { ok: false, code: "INVALID_STATUS" };
+    const now = Date.now();
 
     if (status === "DONE") {
       if (c.status === "DONE") return { ok: true, idempotent: true }; // idempotente
@@ -181,6 +180,8 @@ export const confirmCommand = internalMutation({
         completedAt: now,
         attempts: c.attempts + 1,
         lastAttemptAt: now,
+        claimedBy: undefined,
+        claimedAt: undefined,
         claimExpiresAt: undefined,
         updatedAt: now,
       });
@@ -188,7 +189,7 @@ export const confirmCommand = internalMutation({
       const attempts = c.attempts + 1;
       const exhausted = attempts >= c.maxAttempts;
       await ctx.db.patch(id, {
-        status: exhausted ? "FAILED" : "PENDING", // volta à fila p/ retry até esgotar
+        status: exhausted ? "FAILED" : "PENDING",
         response: undefined,
         reason: response ?? reason ?? "Falha reportada pelo addon",
         attempts,
@@ -196,11 +197,10 @@ export const confirmCommand = internalMutation({
         claimedBy: undefined,
         claimedAt: undefined,
         claimExpiresAt: undefined,
-        executeAt: exhausted ? c.executeAt : now + 60_000, // retry em 1min
+        executeAt: exhausted ? c.executeAt : now + 60_000,
         updatedAt: now,
       });
     } else if (status === "PENDING") {
-      // addon informou que ainda não pode executar (ex.: jogador offline)
       await ctx.db.patch(id, {
         status: "PENDING",
         response: undefined,
@@ -221,7 +221,6 @@ export const confirmCommand = internalMutation({
         updatedAt: now,
       });
     }
-
     await ctx.db.insert("deliveryAttempts", {
       deliveryId: id,
       apiKeyId,
@@ -237,7 +236,6 @@ export const confirmCommand = internalMutation({
   },
 });
 
-/** Heartbeat do addon/servidor. */
 export const heartbeat = internalMutation({
   args: {
     serverId: v.string(),
@@ -294,7 +292,5 @@ export const logApiCall = internalMutation({
 
 export const internalListServers = internalQuery({
   args: {},
-  handler: async (ctx) => {
-    return await ctx.db.query("addonServers").collect();
-  },
+  handler: async (ctx) => await ctx.db.query("addonServers").collect(),
 });

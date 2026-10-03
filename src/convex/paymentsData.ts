@@ -81,10 +81,8 @@ export async function transitionOrder(ctx: any, order: any, mpStatus: string) {
       updatedAt: now,
       statusHistory: [...order.statusHistory, { status: "paid", at: now, note: "Pagamento confirmado pelo gateway" }],
     });
-    // dispara processamento da fila de entrega (sistemas antigo + v1)
+    // dispara processamento da fila de entrega
     await ctx.scheduler.runAfter(0, internal.deliveriesQueue.processOrder, { orderId: order._id });
-    // fila v1: cria commands idempotentes para addons via API
-    await ctx.scheduler.runAfter(0, internal.deliveryCommands.createCommandsForOrder, { orderId: order._id });
     // dispara webhooks de saída
     await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
       event: "order.paid",
@@ -109,9 +107,5 @@ export async function transitionOrder(ctx: any, order: any, mpStatus: string) {
       updatedAt: now,
       statusHistory: [...order.statusHistory, { status: mpStatus, at: now, note: "Status atualizado pelo gateway" }],
     });
-    if (mpStatus === "refunded" || mpStatus === "cancelled" || mpStatus === "failed" || mpStatus === "expired") {
-      // cancela entregas v1 pendentes; reversões de entregas DONE ficam no painel
-      await ctx.scheduler.runAfter(0, internal.deliveryCommands.cancelCommandsForOrder, { orderId: order._id });
-    }
   }
 }

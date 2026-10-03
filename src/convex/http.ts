@@ -1,7 +1,7 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "./_generated/api";
+import { api } from "./_generated/api";
 import { auth } from "./auth";
 
 const http = httpRouter();
@@ -69,40 +69,6 @@ for (const method of ["GET", "POST"] as const) {
     pathPrefix: "/api/external/",
     method,
     handler: externalApi,
-  });
-}
-
-// ─── API v1 — integração de entrega automática p/ addons Minecraft ───
-// Rotas documentadas em /docs/api (arquivo e página pública).
-
-const apiV1 = httpAction(async (ctx, request) => {
-  const url = new URL(request.url);
-  const bodyText = request.method === "GET" ? "" : await request.text();
-  try {
-    const result: any = await ctx.runAction(internal.apiV1.handle, {
-      method: request.method,
-      path: url.pathname.replace(/^\/api\/v1/, ""),
-      token: request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "",
-      bodyText,
-      ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim(),
-    });
-    return Response.json(result.body, {
-      status: result.status,
-      headers: result.headers ?? {},
-    });
-  } catch (e: any) {
-    return Response.json(
-      { errors: [{ message: "Erro interno.", code: "INTERNAL_ERROR" }] },
-      { status: 500 },
-    );
-  }
-});
-
-for (const method of ["GET", "POST", "PATCH"] as const) {
-  http.route({
-    pathPrefix: "/api/v1/",
-    method,
-    handler: apiV1,
   });
 }
 

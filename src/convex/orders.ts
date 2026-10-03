@@ -465,7 +465,6 @@ export const adminUpdateStatus = mutation({
         ],
       });
       await ctx.scheduler.runAfter(0, internal.deliveriesQueue.processOrder, { orderId: id });
-      await ctx.scheduler.runAfter(0, internal.deliveryCommands.createCommandsForOrder, { orderId: id });
       await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
         event: "order.paid",
         payload: {
@@ -514,7 +513,7 @@ export const adminCancel = mutation({
           await ctx.db.patch(product._id, { stock: product.stock + item.quantity });
       }
     }
-    // remove entregas pendentes (fila antiga) e cancela as v1
+    // remove entregas pendentes
     const deliveries = await ctx.db
       .query("deliveries")
       .withIndex("by_order", (q) => q.eq("orderId", id))
@@ -522,7 +521,6 @@ export const adminCancel = mutation({
     for (const d of deliveries) {
       if (d.status !== "delivered") await ctx.db.delete(d._id);
     }
-    await ctx.scheduler.runAfter(0, internal.deliveryCommands.cancelCommandsForOrder, { orderId: id });
     await ctx.db.patch(id, {
       paymentStatus: "cancelled",
       deliveryStatus: "pending",

@@ -19,6 +19,28 @@ export const applyBrandDefaults = internalMutation({
       oldBackgrounds: ["#ffffff", "#0b0d12", "#0a0c10", "#0a0b10"],
     };
 
+    // homepage: se ainda tiver a ordem antiga (sem "server"/"top3" como seções
+    // renderizáveis), adota a nova ordem estilo CentralCart, preservando o estado
+    // enabled de cada seção que já existia.
+    const homepage = (await getSetting(ctx, "homepage")) as any[] | null;
+    if (
+      Array.isArray(homepage) &&
+      !homepage.some((s: any) => s?.type === "server") &&
+      !homepage.some((s: any) => s?.type === "top3")
+    ) {
+      const wasEnabled = (type: string) =>
+        homepage.find((s: any) => s?.type === type)?.enabled ?? true;
+      await setSetting(ctx, "homepage", [
+        { id: "hero", type: "hero", enabled: wasEnabled("hero"), config: {} },
+        { id: "categories", type: "categories", enabled: wasEnabled("categories"), config: {} },
+        { id: "benefits", type: "benefits", enabled: wasEnabled("benefits"), config: {} },
+        { id: "server", type: "server", enabled: true, config: {} },
+        { id: "top3", type: "top3", enabled: true, config: { title: "Top 3 compradores" } },
+        { id: "faq", type: "faq", enabled: wasEnabled("faq"), config: { title: "Perguntas frequentes" } },
+        ...homepage.filter((s: any) => !['hero', 'categories', 'benefits', 'faq'].includes(s?.type)),
+      ]);
+    }
+
     // store
     const store = (await getSetting(ctx, "store")) as any;
     if (store && OLD_VALUES.storeNames.includes(store.name)) {

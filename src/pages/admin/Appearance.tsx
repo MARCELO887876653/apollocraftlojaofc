@@ -20,6 +20,8 @@ const SECTION_TYPES: Record<string, string> = {
   hero: "Hero (banner principal)",
   benefits: "Benefícios",
   categories: "Categorias",
+  server: "Conecte-se ao servidor (IP)",
+  top3: "Top 3 compradores",
   featured: "Produtos em destaque",
   promo: "Promoções",
   popular: "Mais vendidos",

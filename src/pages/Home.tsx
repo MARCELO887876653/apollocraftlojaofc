@@ -252,7 +252,7 @@ function Categories() {
 }
 
 /** Card "Conecte-se ao servidor" com IP copiável. */
-function ServerSection() {
+function ServerSection({ config }: { config?: any }) {
   const store = useQuery(api.settings.getStore) as { serverIp?: string } | undefined;
   const ip = store?.serverIp;
   if (!ip) return null;
@@ -279,7 +279,7 @@ function ServerSection() {
           <span className="flex size-16 items-center justify-center rounded-2xl bg-muted">
             <Swords className="size-7" strokeWidth={2.2} />
           </span>
-          <h3 className="mt-6 text-2xl font-extrabold tracking-tight">Conecte-se ao servidor</h3>
+          <h3 className="mt-6 text-2xl font-extrabold tracking-tight">{config?.title ?? "Conecte-se ao servidor"}</h3>
           <p className="mt-2 text-sm text-muted-foreground sm:text-base">
             Copie o endereço abaixo e entre no jogo agora mesmo.
           </p>
@@ -330,7 +330,7 @@ const RANKS = [
   },
 ];
 
-function TopBuyers() {
+function TopBuyers({ config }: { config?: any }) {
   const buyers = useQuery(api.customers.topBuyers) as Buyer[] | undefined;
   if (!buyers?.length) return null;
 
@@ -343,7 +343,7 @@ function TopBuyers() {
           viewport={{ once: true }}
           className="inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm font-semibold text-muted-foreground"
         >
-          <Trophy className="size-4 text-amber-400" /> Top 3 compradores
+          <Trophy className="size-4 text-amber-400" /> {config?.title ?? "Top 3 compradores"}
         </motion.span>
         <motion.h2
           initial={{ opacity: 0, y: 16 }}
@@ -424,7 +424,7 @@ function ProductSection({
   );
 }
 
-function FaqSection() {
+function FaqSection({ config }: { config?: any }) {
   const faqs = useQuery(api.content.listFaqs, { activeOnly: true }) as any[] | undefined;
   if (!faqs?.length) return null;
   return (
@@ -444,7 +444,7 @@ function FaqSection() {
           viewport={{ once: true }}
           className="mt-5 text-3xl font-extrabold tracking-tight sm:text-4xl"
         >
-          Perguntas frequentes
+          {config?.title ?? "Perguntas frequentes"}
         </motion.h2>
         <p className="mt-3 text-sm text-muted-foreground sm:text-base">
           Veja as perguntas mais comuns e suas respostas
@@ -495,14 +495,16 @@ export default function Home() {
               return <Popular key={section.id} config={cfg} />;
             case "new":
               return <Newest key={section.id} config={cfg} />;
+            case "server":
+              return <ServerSection key={section.id} config={cfg} />;
+            case "top3":
+              return <TopBuyers key={section.id} config={cfg} />;
+            case "faq":
+              return <FaqSection key={section.id} config={cfg} />;
             default:
               return null;
           }
         })}
-      {/* Seções fixas no rodapé da home (ordem do CentralCart) */}
-      <ServerSection />
-      <TopBuyers />
-      <FaqSection />
     </>
   );
 }

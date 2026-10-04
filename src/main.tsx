@@ -1,4 +1,3 @@
-import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
@@ -10,6 +9,14 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import "./index.css";
 import { CartProvider } from "@/lib/cart";
 import { ThemeProvider } from "@/lib/theme";
+
+// Preview/captura de tela do ambiente Freebuff: carregado SOMENTE em
+// desenvolvimento. Em produção este import dinâmico é eliminado pelo Vite
+// (import.meta.env.DEV === false), mantendo o bundle público livre do
+// listener de captura (S1/S4 da auditoria).
+if (import.meta.env.DEV) {
+  void import('@vly-ai/integrations');
+}
 
 // Lazy load route components for better code splitting
 const Home = lazy(() => import("./pages/Home.tsx"));
@@ -152,9 +159,11 @@ function RouteSyncer() {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>
-      <ToolbarErrorBoundary>
-        <VlyToolbar />
-      </ToolbarErrorBoundary>
+      {import.meta.env.DEV && (
+        <ToolbarErrorBoundary>
+          <VlyToolbar />
+        </ToolbarErrorBoundary>
+      )}
       <ConvexAuthProvider client={convex}>
         <ThemeProvider>
           <CartProvider>

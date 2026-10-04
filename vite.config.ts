@@ -6,7 +6,10 @@ import { defineConfig } from "vite";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), vlyPlugin(), tailwindcss()],
+  // NOTA: o vlyPlugin() (preview/captura de tela) foi removido do build de
+  // produção por segurança (S1/S4 da auditoria). A toolbar de preview continua
+  // disponível em desenvolvimento via `VlyToolbar` no src/main.tsx.
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

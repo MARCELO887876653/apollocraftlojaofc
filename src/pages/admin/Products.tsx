@@ -68,7 +68,7 @@ function parseJsonField(text?: string): any {
   }
 }
 
-function toForm(p: Product & any): any {
+export function toForm(p: Product & any): any {
   return {
     name: p.name, shortDescription: p.shortDescription ?? "", description: p.description ?? "",
     image: p.image ?? "", images: p.images ?? [], categoryId: p.categoryId ?? "",
@@ -80,11 +80,21 @@ function toForm(p: Product & any): any {
     deliveryV1: p.deliveryV1
       ? {
           enabled: p.deliveryV1.enabled,
+          version: p.deliveryV1.version,
           actions: (p.deliveryV1.actions ?? []).map((a: any) => ({
+            // `raw` guarda a ação ORIGINAL do backend. Ao salvar, os campos que
+            // o formulário não edita (actionId, contentsPreview, …) são
+            // reemitidos a partir daqui — assim o painel nunca destrói a
+            // referência local do kit (mode/referenceId/referenceRevision).
+            raw: a,
             action: a.action ?? "",
             command: a.command ?? "",
             addonId: a.addonId ?? "",
             serverId: a.serverId ?? "",
+            mode: a.mode ?? "SERVER",
+            referenceId: a.referenceId ?? "",
+            referenceRevision: a.referenceRevision != null ? String(a.referenceRevision) : "",
+            quantityMode: a.quantityMode ?? "",
             offlineExecute: a.offlineExecute ?? true,
             delaySeconds: a.delaySeconds != null ? String(a.delaySeconds) : "",
             payloadText: a.payload != null ? JSON.stringify(a.payload, null, 2) : "",
@@ -98,7 +108,7 @@ function toForm(p: Product & any): any {
   };
 }
 
-function formToData(form: any) {
+export function formToData(form: any) {
   return {
     name: form.name,
     shortDescription: form.shortDescription || undefined,
@@ -129,19 +139,39 @@ function formToData(form: any) {
     deliveryV1: form.deliveryV1?.enabled
       ? {
           enabled: true,
+          ...(form.deliveryV1.version != null ? { version: form.deliveryV1.version } : {}),
           actions: (form.deliveryV1.actions ?? [])
-            .map((a: any) => ({
-              action: (a.action ?? "").trim(),
-              command: a.command?.trim() || undefined,
-              payload: parseJsonField(a.payloadText),
-              serverId: a.serverId?.trim() || undefined,
-              addonId: a.addonId?.trim() || undefined,
-              offlineExecute: a.offlineExecute ?? true,
-              delaySeconds: a.delaySeconds ? Number(a.delaySeconds) : undefined,
-              reverseAction: a.reverseAction?.trim() || undefined,
-              reversePayload: parseJsonField(a.reversePayloadText),
-              reverseDelaySeconds: a.reverseDelaySeconds ? Number(a.reverseDelaySeconds) : undefined,
-            }))
+            .map((a: any) => {
+              // Reemite os campos originais da receita (actionId, contentsPreview,
+              // e qualquer campo do contrato) antes de sobrepor o que foi
+              // editado no formulário. Sem isto, salvar o produto pelo painel
+              // reescrevia a ação só com type/payload e destruía a referência
+              // local do kit criado pelo addon (mode/referenceId/referenceRevision).
+              const base = a.raw && typeof a.raw === "object" ? a.raw : {};
+              const isLocal = a.mode === "LOCAL_REFERENCE";
+              const revText = String(a.referenceRevision ?? "").trim();
+              const revNum = revText === "" ? undefined : Number(revText);
+              return {
+                ...base,
+                action: (a.action ?? "").trim(),
+                command: a.command?.trim() || undefined,
+                payload: parseJsonField(a.payloadText),
+                mode: a.mode === "LOCAL_REFERENCE" || a.mode === "SERVER" ? a.mode : undefined,
+                referenceId: isLocal ? a.referenceId?.trim() || undefined : undefined,
+                referenceRevision:
+                  isLocal && revNum !== undefined && Number.isFinite(revNum)
+                    ? Math.trunc(revNum)
+                    : undefined,
+                quantityMode: a.quantityMode?.trim() || undefined,
+                serverId: a.serverId?.trim() || undefined,
+                addonId: a.addonId?.trim() || undefined,
+                offlineExecute: a.offlineExecute ?? true,
+                delaySeconds: a.delaySeconds ? Number(a.delaySeconds) : undefined,
+                reverseAction: a.reverseAction?.trim() || undefined,
+                reversePayload: parseJsonField(a.reversePayloadText),
+                reverseDelaySeconds: a.reverseDelaySeconds ? Number(a.reverseDelaySeconds) : undefined,
+              };
+            })
             .filter((a: any) => a.action),
         }
       : { enabled: false, actions: [] },
@@ -180,8 +210,18 @@ export default function AdminProducts() {
 
   const save = async () => {
     if (!form.name.trim()) return toast.error("Nome é obrigatório");
-    setSaving(true);
     const data = formToData(form);
+    // Configuração inválida de entrega local: bloqueia o salvamento em vez de
+    // gravar uma receita que produziria uma entrega vazia.
+    const badLocal = (data.deliveryV1?.actions ?? []).find(
+      (a: any) => a.mode === "LOCAL_REFERENCE" && !a.referenceId,
+    );
+    if (badLocal) {
+      return toast.error(
+        `A ação "${badLocal.action || "?"}" está em LOCAL_REFERENCE sem referência. Informe o reference_id enviado pelo addon.`,
+      );
+    }
+    setSaving(true);
     try {
       if (editing === "new") {
         await create({ data });
@@ -683,6 +723,48 @@ export default function AdminProducts() {
                             />
                           </div>
                         </div>
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div>
+                            <Label className="text-xs">Modo</Label>
+                            <Select
+                              value={a.mode ?? "SERVER"}
+                              onValueChange={(v) => updateV1Action(setForm, i, { mode: v })}
+                            >
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="SERVER">SERVER</SelectItem>
+                                <SelectItem value="LOCAL_REFERENCE">LOCAL_REFERENCE</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-xs">Referência local (kit)</Label>
+                            <Input
+                              className="font-mono text-sm"
+                              placeholder="kit:t3tse"
+                              value={a.referenceId}
+                              onChange={(e) => updateV1Action(setForm, i, { referenceId: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Revisão da referência</Label>
+                            <Input
+                              type="number"
+                              className="font-mono text-sm"
+                              placeholder="7"
+                              value={a.referenceRevision}
+                              onChange={(e) => updateV1Action(setForm, i, { referenceRevision: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        {a.mode === "LOCAL_REFERENCE" && (
+                          <p className="text-xs text-muted-foreground">
+                            O kit fica armazenado no Minecraft. Informe a referência e a revisão exatas enviadas
+                            pelo addon — nunca invente esses valores.{" "}
+                            <code className="rounded bg-muted px-1 font-mono">contents_preview</code> é apenas visual e
+                            não reconstrói a entrega.
+                          </p>
+                        )}
                         <div>
                           <Label className="text-xs">Payload (JSON)</Label>
                           <Textarea
@@ -702,7 +784,24 @@ export default function AdminProducts() {
                             onChange={(e) => updateV1Action(setForm, i, { command: e.target.value })}
                           />
                         </div>
-                        <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div>
+                            <Label className="text-xs">Quantidade comprada</Label>
+                            <Select
+                              value={a.quantityMode || "DEFAULT"}
+                              onValueChange={(v) =>
+                                updateV1Action(setForm, i, { quantityMode: v === "DEFAULT" ? "" : v })
+                              }
+                            >
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="DEFAULT">Padrão (1x)</SelectItem>
+                                <SelectItem value="MULTIPLY">MULTIPLY</SelectItem>
+                                <SelectItem value="REPEAT">REPEAT</SelectItem>
+                                <SelectItem value="IGNORE">IGNORE</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                           <div>
                             <Label className="text-xs">Executar após (segundos)</Label>
                             <Input
@@ -762,10 +861,15 @@ export default function AdminProducts() {
                             actions: [
                               ...s.deliveryV1.actions,
                               {
+                                raw: {},
                                 action: "",
                                 command: "",
                                 addonId: "",
                                 serverId: "",
+                                mode: "SERVER",
+                                referenceId: "",
+                                referenceRevision: "",
+                                quantityMode: "",
                                 offlineExecute: true,
                                 delaySeconds: "",
                                 payloadText: "",

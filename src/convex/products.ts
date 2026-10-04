@@ -4,6 +4,7 @@ import { requireAdmin, logAudit } from "./lib/admin";
 import { slugify } from "./lib/data";
 import { applyProductUpdate, createProductRecord } from "./lib/catalog";
 import { deliveryV1Validator } from "./lib/apiSchema";
+import { assertDeliveryV1Valid } from "./lib/deliveryRecipe";
 
 // ─── Público ───
 
@@ -242,6 +243,8 @@ export const create = mutation({
   args: { data: productInput },
   handler: async (ctx, { data }) => {
     const admin = await requireAdmin(ctx, "products.manage");
+    // nunca salva uma receita LOCAL_REFERENCE sem referência (geraria entrega vazia)
+    assertDeliveryV1Valid((data as any).deliveryV1);
     // mesma regra de negócio usada pela API v1 (lib/catalog)
     const { id } = await createProductRecord(ctx, { ...data, createdSource: "ADMIN_PANEL" });
     await logAudit(ctx, admin, "product.create", "product", id, { name: data.name });
@@ -253,6 +256,8 @@ export const update = mutation({
   args: { id: v.id("products"), data: productInput },
   handler: async (ctx, { id, data }) => {
     const admin = await requireAdmin(ctx, "products.manage");
+    // preserva a receita existente; só valida o que está sendo enviado
+    assertDeliveryV1Valid((data as any).deliveryV1);
     await applyProductUpdate(ctx, id, data);
     await logAudit(ctx, admin, "product.update", "product", id, { name: data.name });
   },

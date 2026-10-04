@@ -191,6 +191,39 @@ export function normalizeActionForQuantity(
   return { payload: action.payload ?? {}, repeat: qty };
 }
 
+/**
+ * Valida a configuração interna `deliveryV1` (usada pelo produto).
+ * Retorna a mensagem de erro, ou null se estiver válida.
+ *
+ * Uma ação LOCAL_REFERENCE sem `referenceId` produziria uma entrega vazia —
+ * por isso é tratada como erro de configuração, tanto no painel quanto na
+ * criação automática de entregas.
+ */
+export function deliveryV1ConfigError(deliveryV1: any): string | null {
+  if (!deliveryV1 || !Array.isArray(deliveryV1.actions)) return null;
+  for (const a of deliveryV1.actions) {
+    if (a?.mode !== "LOCAL_REFERENCE") continue;
+    const ref = typeof a.referenceId === "string" ? a.referenceId.trim() : "";
+    if (!ref) {
+      return `A ação '${a.action ?? a.actionId ?? "?"}' está em LOCAL_REFERENCE sem 'reference_id'.`;
+    }
+    if (
+      a.referenceRevision !== undefined &&
+      a.referenceRevision !== null &&
+      !Number.isFinite(Number(a.referenceRevision))
+    ) {
+      return `A ação '${a.action ?? a.actionId ?? "?"}' tem 'reference_revision' inválida.`;
+    }
+  }
+  return null;
+}
+
+/** Lança se a configuração `deliveryV1` for inválida. */
+export function assertDeliveryV1Valid(deliveryV1: any): void {
+  const err = deliveryV1ConfigError(deliveryV1);
+  if (err) throw new Error(err);
+}
+
 /** Valida/normaliza uma receita recebida pela API (lança em formato inválido). */
 export function validateRecipe(raw: any): DeliveryRecipe {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {

@@ -129,6 +129,48 @@ export const internalCreateForOrder = internalMutation({
           .first();
         if (existing) continue; // nunca duplica
 
+        // Configuração inválida: LOCAL_REFERENCE sem referência local NUNCA vira
+        // uma entrega vazia. Criamos um comando de erro visível (não retentável,
+        // exigindo intervenção manual) para o operador corrigir o produto; o
+        // addon não o pega (não é PENDING) nem pode marcá-lo como DONE.
+        if (
+          action.mode === "LOCAL_REFERENCE" &&
+          !(typeof action.referenceId === "string" && action.referenceId.trim())
+        ) {
+          await ctx.db.insert("deliveryCommands", {
+            publicId: generateDeliveryId(),
+            idempotencyKey,
+            orderId,
+            orderNumber: order.number,
+            orderItemIndex: i,
+            productId: product._id,
+            productName: product.name,
+            serverId: action.serverId?.trim() || "GLOBAL",
+            addonId: action.addonId?.trim() || "custom",
+            clientIdentifier,
+            action: action.action,
+            actionId: action.actionId ?? `a${j}`,
+            stepIndex: j,
+            deliveryGroupId: `${orderId}:${i}`,
+            deliveryMode: "LOCAL_REFERENCE",
+            variables: [],
+            offlineExecute: action.offlineExecute ?? true,
+            executeAt: now,
+            status: "FAILED",
+            attempts: 0,
+            maxAttempts: 5,
+            errorCode: "CONFIGURATION_ERROR",
+            lastError: `Produto "${product.name}": ação LOCAL_REFERENCE sem reference_id. Corrija a receita do produto.`,
+            retryable: false,
+            requiresManualIntervention: true,
+            schemaVersion: DELIVERY_SCHEMA_VERSION,
+            createdAt: now,
+            updatedAt: now,
+          });
+          created++;
+          continue;
+        }
+
         const serverId = action.serverId?.trim() || "GLOBAL";
         const addonId = action.addonId?.trim() || "custom";
         const executeAt = now + Math.max(0, action.delaySeconds ?? 0) * 1000;

@@ -2,7 +2,11 @@ import { query, mutation, internalQuery, internalMutation } from "./_generated/s
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { generateDeliveryId } from "./lib/hash";
-import { deliveryV1ToRecipe } from "./lib/deliveryRecipe";
+import { deliveryV1ToRecipe, normalizeActionForQuantity } from "./lib/deliveryRecipe";
+
+// Versão do schema do documento de entrega (permite evoluir sem quebrar
+// entregas antigas, que não possuem este campo).
+const DELIVERY_SCHEMA_VERSION = 1;
 
 // ─────────────────────────────────────────────────────────────
 // Fila de entregas automáticas (delivery_commands)
@@ -27,12 +31,23 @@ function toApiShape(doc: any) {
     server_id: doc.serverId,
     addon_id: doc.addonId,
     action: doc.action,
+    action_id: doc.actionId ?? null,
+    step_index: doc.stepIndex ?? null,
+    delivery_group_id: doc.deliveryGroupId ?? null,
+    mode: doc.deliveryMode ?? "SERVER",
+    reference_id: doc.referenceId ?? null,
+    reference_revision: doc.referenceRevision ?? null,
     command: doc.command ?? null,
     payload: doc.payload ?? {},
     offline_execute: doc.offlineExecute,
     execute_at: new Date(doc.executeAt).toISOString(),
     status: doc.status,
     attempts: doc.attempts,
+    max_attempts: doc.maxAttempts,
+    error_code: doc.errorCode ?? null,
+    retryable: doc.retryable ?? null,
+    next_attempt_at: doc.nextAttemptAt ? new Date(doc.nextAttemptAt).toISOString() : null,
+    requires_manual_intervention: doc.requiresManualIntervention ?? false,
     order: {
       id: doc.orderNumber,
       client_identifier: doc.clientIdentifier,
@@ -52,12 +67,25 @@ function toAdminShape(doc: any) {
     serverId: doc.serverId,
     addonId: doc.addonId,
     action: doc.action,
+    actionId: doc.actionId ?? "",
+    stepIndex: doc.stepIndex ?? null,
+    deliveryGroupId: doc.deliveryGroupId ?? "",
+    deliveryMode: doc.deliveryMode ?? "SERVER",
+    referenceId: doc.referenceId ?? "",
+    referenceRevision: doc.referenceRevision ?? null,
     command: doc.command ?? "",
     payload: doc.payload ?? null,
     offlineExecute: doc.offlineExecute,
     status: doc.status,
     attempts: doc.attempts,
     maxAttempts: doc.maxAttempts,
+    errorCode: doc.errorCode ?? "",
+    lastError: doc.lastError ?? "",
+    retryable: doc.retryable ?? null,
+    nextAttemptAt: doc.nextAttemptAt ?? null,
+    requiresManualIntervention: doc.requiresManualIntervention ?? false,
+    claimToken: doc.claimToken ?? "",
+    claimExpiresAt: doc.claimExpiresAt ?? null,
     response: doc.response ?? "",
     reason: doc.reason ?? "",
     executeAt: doc.executeAt,
@@ -104,6 +132,17 @@ export const internalCreateForOrder = internalMutation({
         const serverId = action.serverId?.trim() || "GLOBAL";
         const addonId = action.addonId?.trim() || "custom";
         const executeAt = now + Math.max(0, action.delaySeconds ?? 0) * 1000;
+        // Normaliza a ação pela quantidade comprada (MULTIPLY/REPEAT/IGNORE)
+        const qty = Math.max(1, Math.trunc(item.quantity ?? 1));
+        const { payload: normalizedPayload, repeat } = normalizeActionForQuantity(action, qty);
+        const variables = [
+          { name: "nickname", value: clientIdentifier },
+          { name: "produto", value: item.name ?? product.name },
+          { name: "produto_id", value: String(product._id) },
+          { name: "quantidade", value: String(qty) },
+          { name: "pedido", value: order.number },
+        ];
+        if (repeat > 1) variables.push({ name: "repeat", value: String(repeat) });
 
         await ctx.db.insert("deliveryCommands", {
           publicId: generateDeliveryId(),
@@ -117,21 +156,22 @@ export const internalCreateForOrder = internalMutation({
           addonId,
           clientIdentifier,
           action: action.action,
+          actionId: action.actionId ?? `a${j}`,
+          stepIndex: j,
+          deliveryGroupId: `${orderId}:${i}`,
+          deliveryMode: action.mode ?? "SERVER",
+          referenceId: action.referenceId ?? undefined,
+          referenceRevision: action.referenceRevision ?? undefined,
           command: action.command?.trim() || undefined,
-          payload: action.payload ?? undefined,
+          payload: normalizedPayload ?? undefined,
           recipeSnapshot,
-          variables: [
-            { name: "nickname", value: clientIdentifier },
-            { name: "produto", value: item.name ?? product.name },
-            { name: "produto_id", value: String(product._id) },
-            { name: "quantidade", value: String(item.quantity ?? 1) },
-            { name: "pedido", value: order.number },
-          ],
+          variables,
           offlineExecute: action.offlineExecute ?? true,
           executeAt,
           status: "PENDING",
           attempts: 0,
           maxAttempts: 5,
+          schemaVersion: DELIVERY_SCHEMA_VERSION,
           reverseAction: action.reverseAction?.trim() || undefined,
           reversePayload: action.reversePayload ?? undefined,
           reverseDelaySeconds: action.reverseDelaySeconds ?? undefined,
@@ -162,17 +202,13 @@ export const internalCreateForOrder = internalMutation({
               action: action.reverseAction,
               payload: action.reversePayload ?? undefined,
               recipeSnapshot,
-              variables: [
-                { name: "nickname", value: clientIdentifier },
-                { name: "produto", value: item.name ?? product.name },
-                { name: "quantidade", value: String(item.quantity ?? 1) },
-                { name: "pedido", value: order.number },
-              ],
+              variables,
               offlineExecute: action.offlineExecute ?? true,
               executeAt: executeAt + Math.max(0, action.reverseDelaySeconds ?? 0) * 1000,
               status: "PENDING",
               attempts: 0,
               maxAttempts: 5,
+              schemaVersion: DELIVERY_SCHEMA_VERSION,
               createdAt: now,
               updatedAt: now,
             });

@@ -40,10 +40,23 @@ export const handle = action({
     query: v.optional(v.any()),
     ip: v.optional(v.string()),
     idempotencyKey: v.optional(v.string()),
+    ambiguousAuth: v.optional(v.boolean()),
   },
-  handler: async (ctx, { method, path, token, bodyText, query, ip, idempotencyKey }): Promise<ApiResult> => {
+  handler: async (
+    ctx,
+    { method, path, token, bodyText, query, ip, idempotencyKey, ambiguousAuth },
+  ): Promise<ApiResult> => {
     const started = Date.now();
     const q = (query ?? {}) as Record<string, string>;
+
+    // ── 0. Cabeçalhos de autenticação ambíguos ──
+    if (ambiguousAuth) {
+      return fail(
+        400,
+        "AMBIGUOUS_AUTH",
+        "Envie apenas um método de autenticação: 'Authorization: Bearer' OU 'X-Api-Key'.",
+      );
+    }
 
     // ── 1. Autenticação ──
     if (!token) {
@@ -156,15 +169,46 @@ export const handle = action({
     const effectiveAddonId = key.addonId || undefined;
 
     try {
-      // ── GET /me ──
+      // ── GET /me — handshake da integração (usado no botão "Testar conexão") ──
       if (route === "me" && method === "GET") {
         await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
         await log(200);
+        const canWriteCatalog = scopes.some(
+          (s) => s.startsWith("products:") || s.startsWith("categories:"),
+        );
         return ok(
           {
+            // campos legados (compatibilidade com integrações já existentes)
             name: key.name,
             server_id: effectiveServerId,
             addon_id: key.addonId ?? null,
+            // handshake estruturado
+            api_version: "v1",
+            authenticated: true,
+            key: {
+              id: String(key._id),
+              name: key.name,
+              // nunca o token completo nem o hash
+              prefix: key.prefix,
+              last_four: key.lastFour,
+              scopes,
+            },
+            binding: {
+              server_id: effectiveServerId,
+              addon_id: key.addonId ?? null,
+            },
+            server_time: new Date().toISOString(),
+            capabilities: {
+              delivery_claim: true,
+              catalog_write: canWriteCatalog,
+              local_reference: true,
+              delivery_recipe_version: 1,
+              supported_delivery_recipe_versions: [1],
+              supports_claim: true,
+              supports_local_reference: true,
+              supports_upsert: true,
+              supports_sync: true,
+            },
             scopes,
             created_at: new Date(key.createdAt).toISOString(),
             last_used_at: new Date().toISOString(),
@@ -191,8 +235,10 @@ export const handle = action({
       }
 
       // ── POST /queued_commands/claim ──
+      // Scope oficial: deliveries:claim. Aceita deliveries:update para
+      // compatibilidade com chaves antigas (documentado como legado).
       if (route === "queued_commands/claim" && method === "POST") {
-        const denied = requireScope(API_SCOPES.deliveriesUpdate);
+        const denied = requireAnyScope([API_SCOPES.deliveriesClaim, API_SCOPES.deliveriesUpdate]);
         if (denied) { await log(denied.status, "scope"); return { ...denied, headers: { ...denied.headers, ...rlHeaders } }; }
         const parsed = parseBody();
         if (!parsed.ok) {
@@ -268,16 +314,43 @@ export const handle = action({
           status: status as "DONE" | "FAILED" | "PENDING" | "CANCELED",
           response: body.response ? String(body.response).slice(0, 2000) : undefined,
           reason: body.reason ? String(body.reason).slice(0, 2000) : undefined,
+          errorCode: body.error_code ? String(body.error_code).slice(0, 64) : undefined,
+          retryable: typeof body.retryable === "boolean" ? body.retryable : undefined,
+          claimToken: body.claim_token ? String(body.claim_token) : undefined,
           apiKeyId: key._id,
           serverId: effectiveServerId,
+          addonId: effectiveAddonId,
         });
         if (!res.ok) {
+          const code = (res as any).code;
+          if (code === "CLAIM_INVALID") {
+            await log(409, "claim invalid", deliveryId);
+            return fail(409, "CLAIM_INVALID", "claim_token inválido para esta entrega. Refaça o claim.", rlHeaders);
+          }
+          if (code === "CLAIM_EXPIRED") {
+            await log(409, "claim expired", deliveryId);
+            return fail(409, "CLAIM_EXPIRED", "O claim expirou. A entrega voltou para a fila; refaça o claim.", rlHeaders);
+          }
+          if (code === "FORBIDDEN") {
+            await log(403, "forbidden", deliveryId);
+            return fail(403, "FORBIDDEN_OBJECT", "Esta entrega pertence a outro servidor/addon.", rlHeaders);
+          }
           await log(404, "not found", deliveryId);
           return fail(404, "DELIVERY_NOT_FOUND", "Entrega não encontrada.", rlHeaders);
         }
         await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
         await log(200, undefined, deliveryId);
-        return ok({ id: deliveryId, status: res.status, updated: true }, rlHeaders);
+        return ok(
+          {
+            id: deliveryId,
+            status: res.status,
+            updated: true,
+            error_code: (res as any).errorCode ?? null,
+            retry_in_ms: (res as any).retryInMs ?? null,
+            permanent: (res as any).permanent ?? false,
+          },
+          rlHeaders,
+        );
       }
 
       // ── POST /heartbeat ──
@@ -294,15 +367,20 @@ export const handle = action({
         const result = await ctx.runMutation(internal.apiV1Data.internalHeartbeat, {
           serverId,
           addonId: effectiveAddonId,
-          version: body.version ? String(body.version) : undefined,
+          version: body.version || body.addon_version ? String(body.version ?? body.addon_version) : undefined,
           minecraftVersion: body.minecraft_version
             ? String(body.minecraft_version)
             : undefined,
+          apiClientVersion: body.api_client_version
+            ? String(body.api_client_version)
+            : undefined,
+          capabilities: body.capabilities ?? undefined,
+          errorCode: body.error_code ? String(body.error_code) : undefined,
           ip,
         });
         await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
         await log(200);
-        return ok({ ...result, server_id: serverId }, rlHeaders);
+        return ok({ ...result, server_id: serverId, online: true }, rlHeaders);
       }
 
       // ─── Catálogo pela API (categorias / produtos / receita / imagens) ───
@@ -321,6 +399,43 @@ export const handle = action({
         return parsed.ok
           ? parsed
           : { ok: false as const, res: { ...parsed.result, headers: rlHeaders } };
+      };
+
+      // ── Idempotency-Key persistente (replay seguro) ──
+      const requestHash = sha256Hex(`${method}:${path}:${bodyText ?? ""}`);
+      const idemReplay = async (): Promise<ApiResult | null> => {
+        if (!idempotencyKey) return null;
+        const prior = await ctx.runQuery(internal.apiV1Data.internalIdempotencyGet, {
+          apiKeyId: key._id,
+          key: idempotencyKey,
+        });
+        if (!prior) return null;
+        if (prior.requestHash !== requestHash) {
+          return fail(
+            409,
+            "IDEMPOTENCY_KEY_REUSED",
+            "Esta Idempotency-Key já foi usada com um corpo diferente.",
+            rlHeaders,
+          );
+        }
+        return { status: prior.status, body: prior.response, headers: rlHeaders };
+      };
+      const idemStore = async (statusCode: number, responseBody: unknown, resourceId?: string) => {
+        if (!idempotencyKey) return;
+        try {
+          await ctx.runMutation(internal.apiV1Data.internalIdempotencyStore, {
+            apiKeyId: key._id,
+            key: idempotencyKey,
+            method,
+            endpoint: path,
+            requestHash,
+            status: statusCode,
+            response: responseBody,
+            resourceId,
+          });
+        } catch {
+          // a idempotência nunca derruba a resposta principal
+        }
       };
 
       // POST /api/v1/files/upload-url  |  POST /api/v1/files/finalize
@@ -360,14 +475,35 @@ export const handle = action({
         if (rest.length === 1 && method === "GET") {
           const denied = scopeDenied(requireScope(API_SCOPES.categoriesRead));
           if (denied) { await log(denied.status, "scope"); return denied; }
-          const data = await ctx.runQuery(internal.apiV1Catalog.internalListCategories, {});
+          const data = await ctx.runQuery(internal.apiV1Catalog.internalListCategories, { meta: catMeta });
           await log(200);
           return ok(data, rlHeaders);
+        }
+
+        // POST /api/v1/categories/upsert — criar-ou-atualizar por external_id
+        if (rest.length === 2 && rest[1] === "upsert" && method === "POST") {
+          const denied = scopeDenied(requireAnyScope([API_SCOPES.categoriesCreate, API_SCOPES.categoriesUpdate]));
+          if (denied) { await log(denied.status, "scope"); return denied; }
+          const replay = await idemReplay();
+          if (replay) { await log(replay.status); return replay; }
+          const parsed = withBody();
+          if (!parsed.ok) { await log(422, "invalid body"); return parsed.res; }
+          const res = await ctx.runMutation(internal.apiV1Catalog.internalUpsertCategory, {
+            data: parsed.value,
+            meta: catMeta,
+          });
+          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
+          const statusCode = res.created ? 201 : 200;
+          await idemStore(statusCode, res.category, String((res.category as any)?.id ?? ""));
+          await log(statusCode);
+          return { status: statusCode, body: res.category, headers: rlHeaders };
         }
 
         if (rest.length === 1 && method === "POST") {
           const denied = scopeDenied(requireScope(API_SCOPES.categoriesCreate));
           if (denied) { await log(denied.status, "scope"); return denied; }
+          const replay = await idemReplay();
+          if (replay) { await log(replay.status); return replay; }
           const parsed = withBody();
           if (!parsed.ok) { await log(422, "invalid body"); return parsed.res; }
           const res = await ctx.runMutation(internal.apiV1Catalog.internalCreateCategory, {
@@ -375,14 +511,16 @@ export const handle = action({
             meta: catMeta,
           });
           await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          await log(res.idempotent ? 200 : 201);
-          return { status: res.idempotent ? 200 : 201, body: res.category, headers: rlHeaders };
+          const statusCode = res.idempotent ? 200 : 201;
+          await idemStore(statusCode, res.category, String((res.category as any)?.id ?? ""));
+          await log(statusCode);
+          return { status: statusCode, body: res.category, headers: rlHeaders };
         }
 
-        if (ref && rest.length === 2 && method === "GET") {
+        if (ref && ref !== "upsert" && rest.length === 2 && method === "GET") {
           const denied = scopeDenied(requireScope(API_SCOPES.categoriesRead));
           if (denied) { await log(denied.status, "scope"); return denied; }
-          const data = await ctx.runQuery(internal.apiV1Catalog.internalGetCategory, { ref });
+          const data = await ctx.runQuery(internal.apiV1Catalog.internalGetCategory, { ref, meta: catMeta });
           if (!data) { await log(404, "not found"); return fail(404, "CATEGORY_NOT_FOUND", "Categoria não encontrada.", rlHeaders); }
           await log(200);
           return ok(data, rlHeaders);
@@ -423,14 +561,35 @@ export const handle = action({
         if (rest.length === 1 && method === "GET") {
           const denied = scopeDenied(requireScope(API_SCOPES.productsRead));
           if (denied) { await log(denied.status, "scope"); return denied; }
-          const data = await ctx.runQuery(internal.apiV1Catalog.internalListProducts, {});
+          const data = await ctx.runQuery(internal.apiV1Catalog.internalListProducts, { meta: catMeta });
           await log(200);
           return ok(data, rlHeaders);
+        }
+
+        // POST /api/v1/products/upsert — criar-ou-atualizar por external_id
+        if (rest.length === 2 && rest[1] === "upsert" && method === "POST") {
+          const denied = scopeDenied(requireAnyScope([API_SCOPES.productsCreate, API_SCOPES.productsUpdate]));
+          if (denied) { await log(denied.status, "scope"); return denied; }
+          const replay = await idemReplay();
+          if (replay) { await log(replay.status); return replay; }
+          const parsed = withBody();
+          if (!parsed.ok) { await log(422, "invalid body"); return parsed.res; }
+          const res = await ctx.runMutation(internal.apiV1Catalog.internalUpsertProduct, {
+            data: parsed.value,
+            meta: catMeta,
+          });
+          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
+          const statusCode = res.created ? 201 : 200;
+          await idemStore(statusCode, res.product, String((res.product as any)?.id ?? ""));
+          await log(statusCode);
+          return { status: statusCode, body: res.product, headers: rlHeaders };
         }
 
         if (rest.length === 1 && method === "POST") {
           const denied = scopeDenied(requireScope(API_SCOPES.productsCreate));
           if (denied) { await log(denied.status, "scope"); return denied; }
+          const replay = await idemReplay();
+          if (replay) { await log(replay.status); return replay; }
           const parsed = withBody();
           if (!parsed.ok) { await log(422, "invalid body"); return parsed.res; }
           const res = await ctx.runMutation(internal.apiV1Catalog.internalCreateProduct, {
@@ -438,8 +597,10 @@ export const handle = action({
             meta: catMeta,
           });
           await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          await log(res.idempotent ? 200 : 201);
-          return { status: res.idempotent ? 200 : 201, body: res.product, headers: rlHeaders };
+          const statusCode = res.idempotent ? 200 : 201;
+          await idemStore(statusCode, res.product, String((res.product as any)?.id ?? ""));
+          await log(statusCode);
+          return { status: statusCode, body: res.product, headers: rlHeaders };
         }
 
         // /products/{id}/delivery-recipe
@@ -483,10 +644,10 @@ export const handle = action({
           return ok(res.product, rlHeaders);
         }
 
-        if (ref && rest.length === 2 && method === "GET") {
+        if (ref && ref !== "upsert" && rest.length === 2 && method === "GET") {
           const denied = scopeDenied(requireScope(API_SCOPES.productsRead));
           if (denied) { await log(denied.status, "scope"); return denied; }
-          const data = await ctx.runQuery(internal.apiV1Catalog.internalGetProduct, { ref });
+          const data = await ctx.runQuery(internal.apiV1Catalog.internalGetProduct, { ref, meta: catMeta });
           if (!data) { await log(404, "not found"); return fail(404, "PRODUCT_NOT_FOUND", "Produto não encontrado.", rlHeaders); }
           await log(200);
           return ok(data, rlHeaders);
@@ -520,6 +681,23 @@ export const handle = action({
         }
       }
 
+      // ── GET /sync/changes — sincronização incremental ──
+      if (route === "sync/changes" && method === "GET") {
+        const denied = requireAnyScope([API_SCOPES.productsRead, API_SCOPES.categoriesRead]);
+        if (denied) { await log(denied.status, "scope"); return { ...denied, headers: { ...denied.headers, ...rlHeaders } }; }
+        const cursor = q.cursor ? String(q.cursor) : undefined;
+        const limitN = Math.min(Number(q.limit) || 100, 200);
+        const data = await ctx.runQuery(internal.apiV1Sync.internalSyncChanges, {
+          serverId: effectiveServerId,
+          addonId: effectiveAddonId,
+          cursor,
+          limit: limitN,
+        });
+        await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
+        await log(200);
+        return ok(data, rlHeaders);
+      }
+
       await log(404, "unknown route");
       return fail(404, "NOT_FOUND", `Rota desconhecida: ${path}`, rlHeaders);
     } catch (e: any) {
@@ -527,7 +705,12 @@ export const handle = action({
       const data = e instanceof ConvexError ? (e.data as any) : undefined;
       if (data && typeof data === "object" && data.code) {
         await log(data.status ?? 422, String(data.code));
-        return fail(data.status ?? 422, String(data.code), String(data.message ?? "Dados inválidos."), rlHeaders);
+        const base = {
+          errors: [{ message: String(data.message ?? "Dados inválidos."), code: String(data.code) }],
+        };
+        const body =
+          data.extra && typeof data.extra === "object" ? { ...base, ...data.extra } : base;
+        return { status: data.status ?? 422, body, headers: rlHeaders };
       }
       // nunca expõe stack trace / detalhes internos
       await log(500, e?.message ?? "internal error");

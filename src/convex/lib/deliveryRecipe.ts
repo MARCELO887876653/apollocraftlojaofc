@@ -2,10 +2,31 @@
 // Ponte entre a "delivery_recipe" (formato da API v1, enviado pelos
 // addons) e o armazenamento interno `product.deliveryV1` (usado pela
 // fila de entrega criada no primeiro prompt). UM único sistema de entrega.
+//
+// Suporte total a LOCAL_REFERENCE: o item/kit permanece armazenado no
+// MINECRAFT; a API guarda apenas reference_id + reference_revision + uma
+// prévia (contents_preview) que serve SOMENTE para exibição/documentação.
+// A entrega real é resolvida pelo addon a partir de reference_id.
 // ─────────────────────────────────────────────────────────────
 
+export type DeliveryMode = "SERVER" | "LOCAL_REFERENCE";
+export type QuantityMode = "MULTIPLY" | "REPEAT" | "IGNORE";
+
+export type ContentsPreview = {
+  type_id: string;
+  name?: string;
+  amount?: number;
+};
+
 export type RecipeAction = {
+  /** id estável da ação (para snapshot, retry, auditoria e idempotência por step). */
+  id?: string;
   type: string;
+  mode?: DeliveryMode;
+  reference_id?: string;
+  reference_revision?: number;
+  contents_preview?: ContentsPreview[];
+  quantity_mode?: QuantityMode;
   payload?: any;
   command?: string;
   offline_execute?: boolean;
@@ -23,12 +44,78 @@ export type DeliveryRecipe = {
   actions: RecipeAction[];
 };
 
+// ─── Limites de payload (evita abuso/acidentes) ───
+export const RECIPE_LIMITS = {
+  MAX_ACTIONS: 25,
+  MAX_NAME: 120,
+  MAX_DESCRIPTION: 5000,
+  MAX_SHORT_DESCRIPTION: 240,
+  MAX_EXTERNAL_ID: 160,
+  MAX_REFERENCE_ID: 160,
+  MAX_PREVIEW_ITEMS: 64,
+  MAX_PAYLOAD_CHARS: 20_000, // por ação (JSON serializado)
+  MAX_COMMAND_CHARS: 512,
+} as const;
+
+function optStr(value: any): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const s = String(value).trim();
+  return s === "" ? undefined : s;
+}
+
+function optNum(value: any): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? Math.trunc(n) : undefined;
+}
+
+function normalizeMode(value: any): DeliveryMode | undefined {
+  const s = optStr(value)?.toUpperCase();
+  if (!s) return undefined;
+  if (s === "LOCAL_REFERENCE" || s === "LOCAL") return "LOCAL_REFERENCE";
+  if (s === "SERVER") return "SERVER";
+  return undefined;
+}
+
+function normalizeQuantityMode(value: any): QuantityMode | undefined {
+  const s = optStr(value)?.toUpperCase();
+  if (!s) return undefined;
+  if (s === "MULTIPLY" || s === "REPEAT" || s === "IGNORE") return s as QuantityMode;
+  return undefined;
+}
+
+function normalizePreview(value: any): ContentsPreview[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: ContentsPreview[] = [];
+  for (const raw of value.slice(0, RECIPE_LIMITS.MAX_PREVIEW_ITEMS)) {
+    if (!raw || typeof raw !== "object") continue;
+    const typeId = optStr(raw.type_id ?? raw.typeId ?? raw.type);
+    if (!typeId) continue;
+    out.push({
+      type_id: typeId.slice(0, 200),
+      name: optStr(raw.name)?.slice(0, 200),
+      amount: optNum(raw.amount) ?? 1,
+    });
+  }
+  return out;
+}
+
 /** delivery_recipe (API) → deliveryV1 (armazenamento interno do produto). */
 export function recipeToDeliveryV1(recipe: DeliveryRecipe) {
-  const actions = (recipe.actions ?? []).map((a) => ({
+  const actions = (recipe.actions ?? []).map((a, index) => ({
+    // id estável: usa o enviado ou gera "a{index}" (compatível com receitas antigas)
+    actionId: optStr(a.id) ?? `a${index}`,
     action: String(a.type),
-    command: typeof a.command === "string" && a.command.trim() ? a.command.trim() : undefined,
+    command:
+      typeof a.command === "string" && a.command.trim()
+        ? a.command.trim().slice(0, RECIPE_LIMITS.MAX_COMMAND_CHARS)
+        : undefined,
     payload: a.payload ?? undefined,
+    mode: normalizeMode(a.mode),
+    referenceId: optStr(a.reference_id)?.slice(0, RECIPE_LIMITS.MAX_REFERENCE_ID),
+    referenceRevision: optNum(a.reference_revision),
+    contentsPreview: normalizePreview(a.contents_preview),
+    quantityMode: normalizeQuantityMode(a.quantity_mode),
     serverId: typeof a.server_id === "string" && a.server_id.trim() ? a.server_id.trim() : undefined,
     addonId: typeof a.addon_id === "string" && a.addon_id.trim() ? a.addon_id.trim() : undefined,
     offlineExecute: a.offline_execute ?? recipe.offline_execute ?? true,
@@ -50,8 +137,15 @@ export function recipeToDeliveryV1(recipe: DeliveryRecipe) {
 
 /** deliveryV1 (armazenamento interno) → delivery_recipe (API). */
 export function deliveryV1ToRecipe(v1: any): DeliveryRecipe {
-  const actions: RecipeAction[] = ((v1?.actions ?? []) as any[]).map((a) => ({
+  const rawActions = Array.isArray(v1?.actions) ? (v1.actions as any[]) : [];
+  const actions: RecipeAction[] = rawActions.map((a, index) => ({
+    id: a.actionId ?? `a${index}`,
     type: a.action,
+    ...(a.mode ? { mode: a.mode as DeliveryMode } : {}),
+    ...(a.referenceId ? { reference_id: a.referenceId } : {}),
+    ...(a.referenceRevision !== undefined ? { reference_revision: a.referenceRevision } : {}),
+    ...(Array.isArray(a.contentsPreview) ? { contents_preview: a.contentsPreview } : {}),
+    ...(a.quantityMode ? { quantity_mode: a.quantityMode as QuantityMode } : {}),
     payload: a.payload ?? {},
     ...(a.command ? { command: a.command } : {}),
     ...(a.offlineExecute !== undefined ? { offline_execute: a.offlineExecute } : {}),
@@ -64,9 +158,37 @@ export function deliveryV1ToRecipe(v1: any): DeliveryRecipe {
   }));
   return {
     version: typeof v1?.version === "number" ? v1.version : 1,
-    offline_execute: actions[0]?.offline_execute ?? true,
+    offline_execute: rawActions[0]?.offlineExecute ?? true,
     actions,
   };
+}
+
+/**
+ * Normaliza uma ação pela quantidade comprada.
+ * MULTIPLY → multiplica valores numéricos do payload (amount/value/qty/quantity).
+ * REPEAT   → repete a ação `quantity` vezes (exposto via `__repeat` no snapshot).
+ * IGNORE   → entrega uma única vez, independente da quantidade.
+ */
+export function normalizeActionForQuantity(
+  action: { quantityMode?: string; payload?: any },
+  quantity: number,
+): { payload: any; repeat: number } {
+  const qty = Math.max(1, Math.trunc(quantity || 1));
+  const mode = action.quantityMode;
+  if (mode === "IGNORE" || !mode || mode === "MULTIPLY") {
+    if (mode === "MULTIPLY" && qty > 1 && action.payload && typeof action.payload === "object") {
+      const payload: any = { ...action.payload };
+      for (const k of ["amount", "value", "qty", "quantity", "count"]) {
+        if (typeof payload[k] === "number" && Number.isFinite(payload[k])) {
+          payload[k] = payload[k] * qty;
+        }
+      }
+      return { payload, repeat: 1 };
+    }
+    return { payload: action.payload ?? {}, repeat: 1 };
+  }
+  // REPEAT
+  return { payload: action.payload ?? {}, repeat: qty };
 }
 
 /** Valida/normaliza uma receita recebida pela API (lança em formato inválido). */
@@ -77,12 +199,44 @@ export function validateRecipe(raw: any): DeliveryRecipe {
   if (!Array.isArray(raw.actions)) {
     throw new Error("delivery_recipe.actions deve ser um array.");
   }
+  if (raw.actions.length === 0) {
+    throw new Error("delivery_recipe.actions não pode ser vazio.");
+  }
+  if (raw.actions.length > RECIPE_LIMITS.MAX_ACTIONS) {
+    throw new Error(`delivery_recipe não pode ter mais de ${RECIPE_LIMITS.MAX_ACTIONS} ações.`);
+  }
   if (typeof raw.version === "number" && (!Number.isFinite(raw.version) || raw.version < 1)) {
     throw new Error("delivery_recipe.version inválida.");
   }
+  const seenIds = new Set<string>();
   for (const a of raw.actions) {
     if (!a || typeof a !== "object" || typeof a.type !== "string" || !a.type.trim()) {
       throw new Error("Cada ação precisa de um campo 'type' (string).");
+    }
+    const id = optStr(a.id);
+    if (id) {
+      if (seenIds.has(id)) throw new Error(`id de ação duplicado: '${id}'.`);
+      seenIds.add(id);
+    }
+    const mode = normalizeMode(a.mode);
+    if (mode === "LOCAL_REFERENCE") {
+      if (!optStr(a.reference_id)) {
+        throw new Error("Ação LOCAL_REFERENCE exige 'reference_id'.");
+      }
+      if (a.reference_revision !== undefined && optNum(a.reference_revision) === undefined) {
+        throw new Error("'reference_revision' deve ser um número inteiro.");
+      }
+    }
+    if (a.quantity_mode !== undefined && !normalizeQuantityMode(a.quantity_mode)) {
+      throw new Error("'quantity_mode' deve ser MULTIPLY, REPEAT ou IGNORE.");
+    }
+    if (a.payload !== undefined) {
+      const size = JSON.stringify(a.payload ?? null).length;
+      if (size > RECIPE_LIMITS.MAX_PAYLOAD_CHARS) {
+        throw new Error(
+          `payload da ação '${a.type}' excede ${RECIPE_LIMITS.MAX_PAYLOAD_CHARS} caracteres.`,
+        );
+      }
     }
   }
   return {

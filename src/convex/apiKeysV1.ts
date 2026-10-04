@@ -170,6 +170,109 @@ export const remove = mutation({
   },
 });
 
+// ─── Admin: diagnóstico das integrações (nunca revela o segredo) ───
+
+const HEARTBEAT_ONLINE_MS = 90_000;
+
+export const adminDiagnostics = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx, "integrations.manage");
+    const keys = await ctx.db.query("apiKeysV1").collect();
+    const servers = await ctx.db.query("addonServers").collect();
+    const now = Date.now();
+    return {
+      keys: keys
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map((k) => {
+          const srv =
+            servers.find((s) => s.serverId === k.serverId && k.addonId && s.addonId === k.addonId) ??
+            servers.find((s) => s.serverId === k.serverId) ??
+            null;
+          return {
+            id: k._id as unknown as string,
+            name: k.name,
+            prefix: k.prefix,
+            lastFour: k.lastFour,
+            scopes: k.scopes,
+            serverId: k.serverId,
+            addonId: k.addonId ?? "",
+            active: k.active,
+            revoked: Boolean(k.revokedAt),
+            lastUsedAt: k.lastUsedAt ?? null,
+            heartbeat: srv
+              ? {
+                  online: now - srv.lastSeenAt <= HEARTBEAT_ONLINE_MS,
+                  lastSeenAt: srv.lastSeenAt,
+                  version: srv.version ?? "",
+                  minecraftVersion: srv.minecraftVersion ?? "",
+                  apiClientVersion: srv.apiClientVersion ?? "",
+                  lastErrorCode: srv.lastErrorCode ?? "",
+                }
+              : null,
+          };
+        }),
+      servers: servers
+        .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+        .map((s) => ({
+          serverId: s.serverId,
+          addonId: s.addonId ?? "",
+          online: now - s.lastSeenAt <= HEARTBEAT_ONLINE_MS,
+          lastSeenAt: s.lastSeenAt,
+          version: s.version ?? "",
+          minecraftVersion: s.minecraftVersion ?? "",
+          apiClientVersion: s.apiClientVersion ?? "",
+          lastErrorCode: s.lastErrorCode ?? "",
+        })),
+    };
+  },
+});
+
+/** Valida uma key: ativa, com scopes, com vínculo e com heartbeat recente. */
+export const adminTestKey = query({
+  args: { id: v.id("apiKeysV1") },
+  handler: async (ctx, { id }) => {
+    await requireAdmin(ctx, "integrations.manage");
+    const k = await ctx.db.get(id);
+    if (!k) return { ok: false, checks: [], key: null, server: null };
+    const servers = await ctx.db.query("addonServers").collect();
+    const srv = servers.find((s) => s.serverId === k.serverId) ?? null;
+    const now = Date.now();
+    const checks = [
+      { label: "Chave ativa", ok: k.active && !k.revokedAt },
+      { label: "Possui permissões (scopes)", ok: (k.scopes?.length ?? 0) > 0 },
+      { label: "Vínculo definido (server_id)", ok: Boolean(k.serverId) },
+      { label: "Heartbeat recente do servidor", ok: Boolean(srv && now - srv.lastSeenAt <= HEARTBEAT_ONLINE_MS) },
+    ];
+    return {
+      ok: checks.every((c) => c.ok),
+      checks,
+      key: {
+        id: k._id as unknown as string,
+        name: k.name,
+        prefix: k.prefix,
+        lastFour: k.lastFour,
+        scopes: k.scopes,
+        serverId: k.serverId,
+        addonId: k.addonId ?? "",
+        active: k.active,
+        revoked: Boolean(k.revokedAt),
+        lastUsedAt: k.lastUsedAt ?? null,
+      },
+      server: srv
+        ? {
+            serverId: srv.serverId,
+            online: now - srv.lastSeenAt <= HEARTBEAT_ONLINE_MS,
+            lastSeenAt: srv.lastSeenAt,
+            version: srv.version ?? "",
+            minecraftVersion: srv.minecraftVersion ?? "",
+            lastErrorCode: srv.lastErrorCode ?? "",
+          }
+        : null,
+    };
+  },
+});
+
 /** Cria uma chave sem exigir admin — usado APENAS pelos testes (internal). */
 export const devCreateForTests = internalMutation({
   args: {

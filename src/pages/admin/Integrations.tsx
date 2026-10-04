@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Loader2, CheckCircle2, XCircle, CreditCard, Gamepad2, KeyRound, Copy,
-  Plus, Trash2, RefreshCw, Server, ShieldCheck, Ban,
+  Plus, Trash2, RefreshCw, Server, ShieldCheck, Ban, Activity, Plug,
 } from "lucide-react";
 
 type Integrations = {
@@ -165,6 +165,8 @@ export default function AdminIntegrations() {
 
       <ApiV1Section />
 
+      <ApiV1Diagnostics />
+
     </div>
   );
 }
@@ -176,7 +178,8 @@ export default function AdminIntegrations() {
 
 const V1_SCOPES: Array<{ value: string; label: string }> = [
   { value: "deliveries:read", label: "Ler entregas" },
-  { value: "deliveries:update", label: "Atualizar entregas" },
+  { value: "deliveries:claim", label: "Reservar entregas (claim)" },
+  { value: "deliveries:update", label: "Confirmar/atualizar entregas" },
   { value: "users:queue", label: "Ler entregas de jogadores" },
   { value: "users:schedules", label: "Ler agendamentos" },
   { value: "server:heartbeat", label: "Heartbeat do servidor" },
@@ -428,5 +431,155 @@ function ApiV1Section() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Diagnóstico das integrações: chaves, servidores e "Testar integração"
+// ─────────────────────────────────────────────────────────────
+
+type KeyDiag = {
+  id: string; name: string; prefix: string; lastFour: string; scopes: string[];
+  serverId: string; addonId: string; active: boolean; revoked: boolean; lastUsedAt: number | null;
+  heartbeat: {
+    online: boolean; lastSeenAt: number; version: string;
+    minecraftVersion: string; apiClientVersion: string; lastErrorCode: string;
+  } | null;
+};
+
+type ServerDiag = {
+  serverId: string; addonId: string; online: boolean; lastSeenAt: number;
+  version: string; minecraftVersion: string; apiClientVersion: string; lastErrorCode: string;
+};
+
+type Diagnostics = { keys: KeyDiag[]; servers: ServerDiag[] };
+
+function ApiV1Diagnostics() {
+  const diag = useQuery(api.apiKeysV1.adminDiagnostics) as Diagnostics | undefined;
+  const [testKeyId, setTestKeyId] = useState<string | null>(null);
+
+  if (!diag) {
+    return (
+      <Card>
+        <CardContent className="py-8">
+          <Loader2 className="mx-auto size-5 animate-spin" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Activity className="size-5 text-primary" />
+          <CardTitle className="text-base">Diagnóstico das integrações</CardTitle>
+        </div>
+        <CardDescription>
+          Status dos servidores/addons conectados via API v1. Nenhum segredo (chave/hash) é exibido aqui.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div>
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">Servidores</p>
+          {diag.servers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum heartbeat recebido ainda.</p>
+          ) : (
+            <div className="space-y-2">
+              {diag.servers.map((s) => (
+                <div key={`${s.serverId}:${s.addonId}`} className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm">
+                  <span className={s.online ? "size-2 rounded-full bg-emerald-500" : "size-2 rounded-full bg-zinc-500"} />
+                  <span className="font-medium">{s.serverId}</span>
+                  {s.addonId && <Badge variant="outline" className="font-mono text-[10px]">{s.addonId}</Badge>}
+                  <span className="text-xs text-muted-foreground">{s.online ? "Online" : "Offline"}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    addon {s.version || "—"} · MC {s.minecraftVersion || "—"} · último contato {new Date(s.lastSeenAt).toLocaleString("pt-BR")}
+                  </span>
+                  {s.lastErrorCode && (
+                    <Badge variant="outline" className="font-mono text-[10px] text-amber-700">{s.lastErrorCode}</Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <Separator />
+
+        <div>
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">Chaves de API</p>
+          {diag.keys.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhuma chave criada ainda.</p>
+          ) : (
+            <div className="space-y-2">
+              {diag.keys.map((k) => (
+                <div key={k.id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2.5">
+                  <Server className="size-4 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                      {k.name}
+                      <Badge variant="outline" className="font-mono text-[10px]">{k.serverId}</Badge>
+                      {k.addonId && <Badge variant="outline" className="font-mono text-[10px]">{k.addonId}</Badge>}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <code className="font-mono">{k.prefix}…{k.lastFour}</code> · {k.scopes.length} permissões
+                      {k.lastUsedAt ? ` · último uso ${new Date(k.lastUsedAt).toLocaleString("pt-BR")}` : " · nunca usada"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {k.heartbeat
+                        ? `Heartbeat: ${k.heartbeat.online ? "online" : "offline"} (${new Date(k.heartbeat.lastSeenAt).toLocaleString("pt-BR")}) · addon ${k.heartbeat.version || "—"} · MC ${k.heartbeat.minecraftVersion || "—"}${k.heartbeat.lastErrorCode ? ` · erro ${k.heartbeat.lastErrorCode}` : ""}`
+                        : "Sem heartbeat deste servidor"}
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setTestKeyId(k.id)}>
+                    <Plug className="mr-1.5 size-3.5" /> Testar integração
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </CardContent>
+
+      {testKeyId && <KeyTestDialog keyId={testKeyId} onClose={() => setTestKeyId(null)} />}
+    </Card>
+  );
+}
+
+function KeyTestDialog({ keyId, onClose }: { keyId: string; onClose: () => void }) {
+  const res = useQuery(api.apiKeysV1.adminTestKey, { id: keyId as any }) as
+    | { ok: boolean; checks: { label: string; ok: boolean }[] }
+    | undefined;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Testar integração</DialogTitle>
+          <DialogDescription>
+            Valida se a chave está ativa, com escopos, com vínculo definido e com heartbeat recente.
+            O segredo nunca é exibido.
+          </DialogDescription>
+        </DialogHeader>
+        {res === undefined ? (
+          <Loader2 className="mx-auto size-5 animate-spin" />
+        ) : (
+          <div className="space-y-2">
+            {res.checks.map((c, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                {c.ok ? (
+                  <CheckCircle2 className="size-4 text-emerald-600" />
+                ) : (
+                  <XCircle className="size-4 text-red-600" />
+                )}
+                {c.label}
+              </div>
+            ))}
+            <p className={res.ok ? "text-sm font-semibold text-emerald-700" : "text-sm font-semibold text-amber-700"}>
+              {res.ok ? "Integração OK" : "Há pendências — confira os itens acima"}
+            </p>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

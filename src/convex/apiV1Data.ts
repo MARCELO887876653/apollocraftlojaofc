@@ -11,7 +11,35 @@ import { generateClaimToken } from "./lib/hash";
 const CLAIM_LEASE_MS = 5 * 60 * 1000; // 5 minutos
 const HEARTBEAT_ONLINE_MS = 90 * 1000; // considerado online nos últimos 90s
 
-export { CLAIM_LEASE_MS, HEARTBEAT_ONLINE_MS };
+// Códigos de erro semânticos aceitos na confirmação (PATCH command).
+export const ERROR_CODES = {
+  PLAYER_OFFLINE: "PLAYER_OFFLINE",
+  HANDLER_NOT_FOUND: "HANDLER_NOT_FOUND",
+  REFERENCE_NOT_FOUND: "REFERENCE_NOT_FOUND",
+  REFERENCE_REVISION_NOT_FOUND: "REFERENCE_REVISION_NOT_FOUND",
+  INVALID_PAYLOAD: "INVALID_PAYLOAD",
+  TEMPORARY_STORAGE_ERROR: "TEMPORARY_STORAGE_ERROR",
+  CLAIM_EXPIRED: "CLAIM_EXPIRED",
+  CLAIM_INVALID: "CLAIM_INVALID",
+  MAX_ATTEMPTS_REACHED: "MAX_ATTEMPTS_REACHED",
+} as const;
+
+// Erros que NUNCA devem ser reagendados automaticamente (falha definitiva).
+const NON_RETRYABLE_CODES = new Set<string>([
+  ERROR_CODES.HANDLER_NOT_FOUND,
+  ERROR_CODES.REFERENCE_NOT_FOUND,
+  ERROR_CODES.REFERENCE_REVISION_NOT_FOUND,
+  ERROR_CODES.INVALID_PAYLOAD,
+  ERROR_CODES.MAX_ATTEMPTS_REACHED,
+]);
+
+const BACKOFFS_MS = [60_000, 300_000, 900_000, 3_600_000, 7_200_000];
+
+function backoffFor(attempts: number): number {
+  return BACKOFFS_MS[Math.max(0, Math.min(attempts - 1, BACKOFFS_MS.length - 1))];
+}
+
+export { CLAIM_LEASE_MS, HEARTBEAT_ONLINE_MS, NON_RETRYABLE_CODES, backoffFor };
 
 // ─── Rate limit por API Key + bucket (GET vs escrita) ───
 
@@ -92,15 +120,27 @@ export const internalClaim = internalMutation({
       }
     }
 
-    // 2) seleciona entregas disponíveis
+    // 2) seleciona entregas disponíveis (PENDING e FAILED retryable vencidas)
     const candidates: any[] = [];
     for (const sid of visibleServers(serverId)) {
-      const rows = await ctx.db
+      const pending = await ctx.db
         .query("deliveryCommands")
         .withIndex("by_server_status", (q) => q.eq("serverId", sid).eq("status", "PENDING"))
         .collect();
-      for (const r of rows) {
+      for (const r of pending) {
         if (r.executeAt > now) continue;
+        if (addonId && r.addonId !== addonId) continue;
+        candidates.push(r);
+      }
+      // retries agendados: status FAILED + retryable=true + nextAttemptAt vencido
+      const failed = await ctx.db
+        .query("deliveryCommands")
+        .withIndex("by_server_status", (q) => q.eq("serverId", sid).eq("status", "FAILED"))
+        .collect();
+      for (const r of failed) {
+        if (r.retryable !== true) continue;
+        if (r.requiresManualIntervention) continue;
+        if ((r.nextAttemptAt ?? r.executeAt) > now) continue;
         if (addonId && r.addonId !== addonId) continue;
         candidates.push(r);
       }
@@ -135,14 +175,22 @@ export const internalClaim = internalMutation({
         server_id: c.serverId,
         addon_id: c.addonId,
         action: c.action,
+        action_id: c.actionId ?? null,
+        step_index: c.stepIndex ?? null,
+        delivery_group_id: c.deliveryGroupId ?? null,
+        mode: c.deliveryMode ?? "SERVER",
+        reference_id: c.referenceId ?? null,
+        reference_revision: c.referenceRevision ?? null,
         command: c.command ?? null,
         payload: c.payload ?? {},
         offline_execute: c.offlineExecute,
         execute_at: new Date(c.executeAt).toISOString(),
         status: "PROCESSING",
         attempts: c.attempts + 1,
+        max_attempts: c.maxAttempts,
         claim_token: claimToken,
         claimed_at: new Date(now).toISOString(),
+        claimed_by: apiKeyId,
         claim_expires_at: new Date(now + lease).toISOString(),
         order: {
           id: c.orderNumber,
@@ -157,6 +205,11 @@ export const internalClaim = internalMutation({
 
 // ─── Confirmação (PATCH command) ───
 
+function commandVisible(commandServerId: string, keyServerId: string): boolean {
+  if (keyServerId === "GLOBAL" || !keyServerId) return true;
+  return commandServerId === keyServerId || commandServerId === "GLOBAL";
+}
+
 export const internalConfirm = internalMutation({
   args: {
     publicId: v.string(),
@@ -168,17 +221,49 @@ export const internalConfirm = internalMutation({
     ),
     response: v.optional(v.string()),
     reason: v.optional(v.string()),
+    errorCode: v.optional(v.string()),
+    retryable: v.optional(v.boolean()),
+    claimToken: v.optional(v.string()),
     apiKeyId: v.id("apiKeysV1"),
     serverId: v.string(),
+    addonId: v.optional(v.string()),
   },
-  handler: async (ctx, { publicId, status, response, reason, apiKeyId, serverId }) => {
+  handler: async (
+    ctx,
+    { publicId, status, response, reason, errorCode, retryable, claimToken, apiKeyId, serverId, addonId },
+  ) => {
     const c: any = await ctx.db
       .query("deliveryCommands")
       .withIndex("by_publicId", (q) => q.eq("publicId", publicId))
       .first();
     if (!c) return { ok: false as const, code: "NOT_FOUND" as const };
 
+    // ── autorização por objeto: uma chave não confirma entrega de outro servidor/addon ──
+    if (!commandVisible(c.serverId, serverId)) {
+      return { ok: false as const, code: "FORBIDDEN" as const };
+    }
+    if (addonId && c.addonId !== addonId) {
+      return { ok: false as const, code: "FORBIDDEN" as const };
+    }
+
     const now = Date.now();
+
+    // ── claim_token: só exigido quando a entrega foi de fato reservada (PROCESSING) ──
+    if (c.status === "PROCESSING") {
+      if (!claimToken || c.claimToken !== claimToken) {
+        return { ok: false as const, code: "CLAIM_INVALID" as const };
+      }
+      if (c.claimExpiresAt !== undefined && c.claimExpiresAt < now) {
+        return { ok: false as const, code: "CLAIM_EXPIRED" as const };
+      }
+    }
+
+    const clearClaim = {
+      claimedBy: undefined,
+      claimedAt: undefined,
+      claimExpiresAt: undefined,
+      claimToken: undefined,
+    };
 
     if (status === "DONE") {
       if (c.status === "DONE") return { ok: true as const, status: "DONE" as const, idempotent: true };
@@ -186,10 +271,12 @@ export const internalConfirm = internalMutation({
         status: "DONE",
         response: response ?? "Entregue com sucesso",
         completedAt: now,
-        claimedBy: undefined,
-        claimedAt: undefined,
-        claimExpiresAt: undefined,
-        claimToken: undefined,
+        errorCode: undefined,
+        lastError: undefined,
+        retryable: false,
+        nextAttemptAt: undefined,
+        requiresManualIntervention: false,
+        ...clearClaim,
         updatedAt: now,
       });
       await finishOpenAttempt(ctx, c._id, "DONE", response, reason);
@@ -202,10 +289,7 @@ export const internalConfirm = internalMutation({
         response: response ?? undefined,
         reason: reason ?? "Cancelado pelo addon",
         completedAt: now,
-        claimedBy: undefined,
-        claimedAt: undefined,
-        claimExpiresAt: undefined,
-        claimToken: undefined,
+        ...clearClaim,
         updatedAt: now,
       });
       await finishOpenAttempt(ctx, c._id, "CANCELED", response, reason);
@@ -213,53 +297,69 @@ export const internalConfirm = internalMutation({
     }
 
     if (status === "PENDING") {
-      // devolve para a fila (ex.: jogador offline)
+      // devolve para a fila sem consumir tentativa (ex.: jogador offline)
+      const isOffline = errorCode === ERROR_CODES.PLAYER_OFFLINE || /PLAYER_OFFLINE/i.test(response ?? "");
       await ctx.db.patch(c._id, {
         status: "PENDING",
-        response: response ?? "PLAYER_OFFLINE",
+        response: response ?? ERROR_CODES.PLAYER_OFFLINE,
         reason: reason ?? undefined,
-        claimedBy: undefined,
-        claimedAt: undefined,
-        claimExpiresAt: undefined,
-        claimToken: undefined,
+        errorCode: errorCode ?? (isOffline ? ERROR_CODES.PLAYER_OFFLINE : undefined),
+        // offline não consome max_attempts: restaura a tentativa consumida no claim
+        attempts: isOffline ? Math.max(0, c.attempts - 1) : c.attempts,
+        executeAt: now,
+        retryable: undefined,
+        nextAttemptAt: undefined,
+        requiresManualIntervention: false,
+        ...clearClaim,
         updatedAt: now,
       });
       await finishOpenAttempt(ctx, c._id, "PENDING", response, reason);
-      return { ok: true as const, status: "PENDING" as const };
+      return { ok: true as const, status: "PENDING" as const, playerOffline: isOffline };
     }
 
-    // FAILED
+    // ── FAILED ──
     const attempts = c.attempts;
-    if (attempts >= c.maxAttempts) {
+    const code = errorCode ?? undefined;
+    const forcedFinal = retryable === false || (code ? NON_RETRYABLE_CODES.has(code) : false);
+    const exhausted = attempts >= c.maxAttempts;
+
+    if (forcedFinal || exhausted) {
+      const finalCode = exhausted ? ERROR_CODES.MAX_ATTEMPTS_REACHED : code;
       await ctx.db.patch(c._id, {
         status: "FAILED",
         response: response ?? "Falha na entrega",
         reason: reason ?? undefined,
+        errorCode: finalCode,
+        lastError: response ?? reason ?? undefined,
+        retryable: false,
+        nextAttemptAt: undefined,
+        requiresManualIntervention: true,
+        lastAttemptAt: now,
         completedAt: now,
-        claimedBy: undefined,
-        claimedAt: undefined,
-        claimExpiresAt: undefined,
-        claimToken: undefined,
+        ...clearClaim,
         updatedAt: now,
       });
       await finishOpenAttempt(ctx, c._id, "FAILED", response, reason);
-      return { ok: true as const, status: "FAILED" as const, permanent: true };
+      return { ok: true as const, status: "FAILED" as const, permanent: true, errorCode: finalCode };
     }
-    const backoffs = [60_000, 300_000, 900_000, 3_600_000, 7_200_000];
-    const delay = backoffs[Math.max(0, Math.min(attempts - 1, backoffs.length - 1))];
+
+    // falha temporária → FAILED + retryable=true + backoff
+    const delay = backoffFor(attempts);
     await ctx.db.patch(c._id, {
-      status: "PENDING",
+      status: "FAILED",
       response: response ?? "Falha temporária — nova tentativa agendada",
       reason: reason ?? undefined,
-      executeAt: now + delay,
-      claimedBy: undefined,
-      claimedAt: undefined,
-      claimExpiresAt: undefined,
-      claimToken: undefined,
+      errorCode: code ?? ERROR_CODES.TEMPORARY_STORAGE_ERROR,
+      lastError: response ?? reason ?? undefined,
+      retryable: true,
+      nextAttemptAt: now + delay,
+      requiresManualIntervention: false,
+      lastAttemptAt: now,
+      ...clearClaim,
       updatedAt: now,
     });
     await finishOpenAttempt(ctx, c._id, "FAILED", response, reason);
-    return { ok: true as const, status: "PENDING" as const, retryInMs: delay };
+    return { ok: true as const, status: "FAILED" as const, retryInMs: delay };
   },
 });
 
@@ -306,9 +406,15 @@ export const internalHeartbeat = internalMutation({
     addonId: v.optional(v.string()),
     version: v.optional(v.string()),
     minecraftVersion: v.optional(v.string()),
+    apiClientVersion: v.optional(v.string()),
+    capabilities: v.optional(v.any()),
+    errorCode: v.optional(v.string()),
     ip: v.optional(v.string()),
   },
-  handler: async (ctx, { serverId, addonId, version, minecraftVersion, ip }) => {
+  handler: async (
+    ctx,
+    { serverId, addonId, version, minecraftVersion, apiClientVersion, capabilities, errorCode, ip },
+  ) => {
     const now = Date.now();
     const existing = addonId
       ? await ctx.db
@@ -324,25 +430,33 @@ export const internalHeartbeat = internalMutation({
         addonId: addonId ?? existing.addonId,
         version: version ?? existing.version,
         minecraftVersion: minecraftVersion ?? existing.minecraftVersion,
+        apiClientVersion: apiClientVersion ?? existing.apiClientVersion,
+        capabilities: capabilities ?? existing.capabilities,
+        lastErrorCode: errorCode ?? existing.lastErrorCode,
+        lastErrorAt: errorCode ? now : existing.lastErrorAt,
         lastSeenAt: now,
         lastIp: ip ?? existing.lastIp,
         status: "online",
         updatedAt: now,
       });
-      return { ok: true as const, serverId };
+      return { ok: true as const, serverId, server_time: new Date(now).toISOString() };
     }
     await ctx.db.insert("addonServers", {
       serverId,
       addonId: addonId ?? undefined,
       version: version ?? undefined,
       minecraftVersion: minecraftVersion ?? undefined,
+      apiClientVersion: apiClientVersion ?? undefined,
+      capabilities: capabilities ?? undefined,
+      lastErrorCode: errorCode ?? undefined,
+      lastErrorAt: errorCode ? now : undefined,
       lastSeenAt: now,
       lastIp: ip ?? undefined,
       status: "online",
       createdAt: now,
       updatedAt: now,
     });
-    return { ok: true as const, serverId };
+    return { ok: true as const, serverId, server_time: new Date(now).toISOString() };
   },
 });
 
@@ -357,11 +471,56 @@ export const internalListServers = internalQuery({
         addonId: s.addonId ?? "",
         version: s.version ?? "",
         minecraftVersion: s.minecraftVersion ?? "",
+        apiClientVersion: s.apiClientVersion ?? "",
+        capabilities: s.capabilities ?? null,
+        lastErrorCode: s.lastErrorCode ?? "",
+        lastErrorAt: s.lastErrorAt ?? null,
         lastSeenAt: s.lastSeenAt,
         lastIp: s.lastIp ?? "",
         online: now - s.lastSeenAt <= HEARTBEAT_ONLINE_MS,
       }))
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  },
+});
+
+// ─── Idempotência persistente (Idempotency-Key) ───
+
+export const internalIdempotencyGet = internalQuery({
+  args: { apiKeyId: v.id("apiKeysV1"), key: v.string() },
+  handler: async (ctx, { apiKeyId, key }) => {
+    const doc = await ctx.db
+      .query("idempotencyKeysV1")
+      .withIndex("by_key", (q) => q.eq("apiKeyId", apiKeyId).eq("key", key))
+      .first();
+    if (!doc) return null;
+    if (doc.expiresAt && doc.expiresAt < Date.now()) return null;
+    return { requestHash: doc.requestHash, status: doc.status, response: doc.response };
+  },
+});
+
+export const internalIdempotencyStore = internalMutation({
+  args: {
+    apiKeyId: v.id("apiKeysV1"),
+    key: v.string(),
+    method: v.string(),
+    endpoint: v.string(),
+    requestHash: v.string(),
+    status: v.number(),
+    response: v.any(),
+    resourceId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("idempotencyKeysV1")
+      .withIndex("by_key", (q) => q.eq("apiKeyId", args.apiKeyId).eq("key", args.key))
+      .first();
+    const now = Date.now();
+    const expiresAt = now + 24 * 60 * 60 * 1000; // 24h
+    if (existing) {
+      await ctx.db.patch(existing._id, { ...args, createdAt: now, expiresAt });
+      return;
+    }
+    await ctx.db.insert("idempotencyKeysV1", { ...args, createdAt: now, expiresAt });
   },
 });
 
@@ -408,6 +567,10 @@ export const adminListServers = query({
         addonId: s.addonId ?? "",
         version: s.version ?? "",
         minecraftVersion: s.minecraftVersion ?? "",
+        apiClientVersion: s.apiClientVersion ?? "",
+        capabilities: s.capabilities ?? null,
+        lastErrorCode: s.lastErrorCode ?? "",
+        lastErrorAt: s.lastErrorAt ?? null,
         lastSeenAt: s.lastSeenAt,
         online: now - s.lastSeenAt <= HEARTBEAT_ONLINE_MS,
       }))

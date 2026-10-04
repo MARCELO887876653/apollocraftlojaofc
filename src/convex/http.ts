@@ -85,9 +85,11 @@ for (const method of ["GET", "POST"] as const) {
 const apiV1 = httpAction(async (ctx, request) => {
   const url = new URL(request.url);
   const auth = request.headers.get("authorization") ?? "";
-  const token =
-    auth.replace(/^Bearer\s+/i, "").trim() ||
-    (request.headers.get("x-api-key") ?? "").trim();
+  const bearer = auth.replace(/^Bearer\s+/i, "").trim();
+  const xApiKey = (request.headers.get("x-api-key") ?? "").trim();
+  const token = bearer || xApiKey;
+  // Se os dois cabeçalhos vierem com valores DIFERENTES, é ambíguo → rejeita.
+  const ambiguousAuth = Boolean(bearer && xApiKey && bearer !== xApiKey);
   const query: Record<string, string> = {};
   url.searchParams.forEach((value, k) => {
     query[k] = value;
@@ -106,6 +108,7 @@ const apiV1 = httpAction(async (ctx, request) => {
       query,
       ip,
       idempotencyKey,
+      ambiguousAuth,
     });
     return Response.json(result.body ?? {}, {
       status: result.status,

@@ -25,17 +25,27 @@ export async function createCategoryRecord(ctx: MutationCtx, data: any) {
   const { slug: slugHint, ...rest } = data;
   const slug = await uniqueCategorySlug(ctx, slugHint || data.name);
   const now = Date.now();
-  const id = await ctx.db.insert("categories", { ...rest, slug, createdAt: now, updatedAt: now });
+  const id = await ctx.db.insert("categories", {
+    ...rest,
+    slug,
+    revision: rest.revision ?? 1,
+    createdAt: now,
+    updatedAt: now,
+  });
   return { id, slug };
 }
 
-/** Aplica uma edição parcial de categoria. */
+/** Aplica uma edição parcial de categoria (incrementa revision se não vier explícita). */
 export async function applyCategoryUpdate(ctx: MutationCtx, id: any, data: any) {
   const patch: any = { ...data, updatedAt: Date.now() };
   if (typeof data.slugHint === "string" && data.slugHint.trim()) {
     patch.slug = await uniqueCategorySlug(ctx, data.slugHint, id);
   }
   delete patch.slugHint;
+  if (patch.revision === undefined) {
+    const current: any = await ctx.db.get(id);
+    patch.revision = ((current?.revision ?? 1) as number) + 1;
+  }
   await ctx.db.patch(id, patch);
 }
 
@@ -60,6 +70,7 @@ export async function createProductRecord(ctx: MutationCtx, data: any) {
   const id = await ctx.db.insert("products", {
     ...rest,
     slug,
+    revision: rest.revision ?? 1,
     salesCount: 0,
     createdAt: now,
     updatedAt: now,
@@ -67,12 +78,16 @@ export async function createProductRecord(ctx: MutationCtx, data: any) {
   return { id, slug };
 }
 
-/** Aplica uma edição parcial de produto. */
+/** Aplica uma edição parcial de produto (incrementa revision se não vier explícita). */
 export async function applyProductUpdate(ctx: MutationCtx, id: any, data: any) {
   const patch: any = { ...data, updatedAt: Date.now() };
   if (typeof data.slugHint === "string" && data.slugHint.trim()) {
     patch.slug = await uniqueProductSlug(ctx, data.slugHint, id);
   }
   delete patch.slugHint;
+  if (patch.revision === undefined) {
+    const current: any = await ctx.db.get(id);
+    patch.revision = ((current?.revision ?? 1) as number) + 1;
+  }
   await ctx.db.patch(id, patch);
 }

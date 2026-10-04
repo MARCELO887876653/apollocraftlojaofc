@@ -10,6 +10,7 @@ import { v } from "convex/values";
 /** Permissões (scopes) que uma API Key pode ter. */
 export const API_SCOPES = {
   deliveriesRead: "deliveries:read",
+  deliveriesClaim: "deliveries:claim",
   deliveriesUpdate: "deliveries:update",
   usersQueue: "users:queue",
   usersSchedules: "users:schedules",
@@ -34,6 +35,7 @@ export const ALL_API_SCOPES: string[] = Object.values(API_SCOPES);
 
 export const apiScopeValidator = v.union(
   v.literal("deliveries:read"),
+  v.literal("deliveries:claim"),
   v.literal("deliveries:update"),
   v.literal("users:queue"),
   v.literal("users:schedules"),
@@ -62,11 +64,41 @@ export const deliveryCommandStatusValidator = v.union(
 
 export type DeliveryCommandStatus = "PENDING" | "PROCESSING" | "DONE" | "FAILED" | "CANCELED";
 
+/** Modos de entrega de uma ação. `LOCAL_REFERENCE` mantém o item/kit no addon. */
+export const deliveryModeValidator = v.union(
+  v.literal("SERVER"),
+  v.literal("LOCAL_REFERENCE"),
+);
+
+/** Como a quantidade comprada multiplica a ação. */
+export const quantityModeValidator = v.union(
+  v.literal("MULTIPLY"),
+  v.literal("REPEAT"),
+  v.literal("IGNORE"),
+);
+
+/** Prévia visual de um kit/item local (NUNCA usada para reconstruir a entrega). */
+export const contentsPreviewV1Validator = v.array(
+  v.object({
+    type_id: v.string(),
+    name: v.optional(v.string()),
+    amount: v.optional(v.number()),
+  }),
+);
+
 /** Uma ação de entrega configurada no produto (livre: action + payload JSON). */
 export const deliveryActionV1Validator = v.object({
+  // id estável da ação (permite snapshot, retry, auditoria e idempotência por step)
+  actionId: v.optional(v.string()),
   action: v.string(),
   command: v.optional(v.string()),
   payload: v.optional(v.any()),
+  // LOCAL_REFERENCE: o addon reconstrói a entrega a partir de referenceId
+  mode: v.optional(deliveryModeValidator),
+  referenceId: v.optional(v.string()),
+  referenceRevision: v.optional(v.number()),
+  contentsPreview: v.optional(contentsPreviewV1Validator),
+  quantityMode: v.optional(quantityModeValidator),
   serverId: v.optional(v.string()),
   addonId: v.optional(v.string()),
   offlineExecute: v.boolean(),
@@ -130,6 +162,22 @@ export const apiV1Tables = {
     maxAttempts: v.number(),
     lastAttemptAt: v.optional(v.number()),
     completedAt: v.optional(v.number()),
+    // ── retry profissional (aditivo; entregas antigas ficam legíveis) ──
+    errorCode: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    retryable: v.optional(v.boolean()),
+    nextAttemptAt: v.optional(v.number()),
+    requiresManualIntervention: v.optional(v.boolean()),
+    // ── step / composição (cada ação é um step idempotente) ──
+    actionId: v.optional(v.string()),
+    stepIndex: v.optional(v.number()),
+    deliveryGroupId: v.optional(v.string()),
+    // ── LOCAL_REFERENCE (entrega resolvida pelo addon) ──
+    deliveryMode: v.optional(v.string()),
+    referenceId: v.optional(v.string()),
+    referenceRevision: v.optional(v.number()),
+    // versão do schema do documento (compatibilidade futura)
+    schemaVersion: v.optional(v.number()),
     // reversão (VIP → REMOVE_RANK no reembolso)
     reverseAction: v.optional(v.string()),
     reversePayload: v.optional(v.any()),
@@ -150,6 +198,7 @@ export const apiV1Tables = {
     .index("by_server_status", ["serverId", "status"])
     .index("by_client", ["clientIdentifier"])
     .index("by_order", ["orderId"])
+    .index("by_group", ["deliveryGroupId"])
     .index("by_createdAt", ["createdAt"]),
 
   // ─── Histórico de tentativas de entrega ───
@@ -177,6 +226,11 @@ export const apiV1Tables = {
     lastSeenAt: v.number(),
     lastIp: v.optional(v.string()),
     status: v.string(), // online | offline
+    // diagnóstico (aditivo)
+    apiClientVersion: v.optional(v.string()),
+    capabilities: v.optional(v.any()),
+    lastErrorCode: v.optional(v.string()),
+    lastErrorAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -200,4 +254,23 @@ export const apiV1Tables = {
   })
     .index("by_createdAt", ["createdAt"])
     .index("by_key", ["apiKeyId"]),
+
+  // ─── Idempotência persistente (Idempotency-Key) ───
+  // Guarda a assinatura da requisição e a resposta para REPLAY.
+  // Mesma key + mesmo corpo → devolve a mesma resposta sem reexecutar.
+  // Mesma key + corpo diferente → 409 IDEMPOTENCY_KEY_REUSED.
+  idempotencyKeysV1: defineTable({
+    apiKeyId: v.id("apiKeysV1"),
+    key: v.string(),
+    method: v.string(),
+    endpoint: v.string(),
+    requestHash: v.string(),
+    status: v.number(),
+    response: v.any(),
+    resourceId: v.optional(v.string()),
+    createdAt: v.number(),
+    expiresAt: v.optional(v.number()),
+  })
+    .index("by_key", ["apiKeyId", "key"])
+    .index("by_createdAt", ["createdAt"]),
 };

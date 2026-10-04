@@ -117,11 +117,14 @@ const schema = defineSchema(
       sourceAddonId: v.optional(v.string()),
       sourceApiKeyId: v.optional(v.string()),
       archivedAt: v.optional(v.number()),
+      // controle de versão p/ sincronização (incrementa a cada alteração)
+      revision: v.optional(v.number()),
       ...seo,
       createdAt: v.number(),
       updatedAt: v.number(),
     })
       .index("by_slug", ["slug"])
+      .index("by_external", ["externalId"])
       .index("by_parent_order", ["parentId", "order"]),
 
     products: defineTable({
@@ -158,11 +161,14 @@ const schema = defineSchema(
       sourceAddonId: v.optional(v.string()),
       sourceApiKeyId: v.optional(v.string()),
       archivedAt: v.optional(v.number()),
+      // controle de versão p/ sincronização (incrementa a cada alteração)
+      revision: v.optional(v.number()),
       ...seo,
       createdAt: v.number(),
       updatedAt: v.number(),
     })
       .index("by_slug", ["slug"])
+      .index("by_external", ["externalId"])
       .index("by_category", ["categoryId"])
       .index("by_active_order", ["active", "order"]),
 

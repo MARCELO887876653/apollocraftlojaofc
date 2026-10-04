@@ -56,7 +56,10 @@ export default function OrderStatusPage() {
   const { number = "" } = useParams();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
-  const order = useQuery(api.orders.getByNumber, { number: decodeURIComponent(number) }) as Order | null | undefined;
+  const order = useQuery(api.orders.getByNumber, {
+    number: decodeURIComponent(number),
+    token: token || undefined,
+  }) as Order | null | undefined;
 
   const [creatingPix, setCreatingPix] = useState(false);
   const [pixFailed, setPixFailed] = useState(false);
@@ -212,7 +215,7 @@ export default function OrderStatusPage() {
             transition={{ duration: 0.4, ease: "easeOut" }}
             className="mt-8"
           >
-            <DeliveriesList number={order.number} variant="guest" />
+            <DeliveriesList number={order.number} token={token || undefined} variant="guest" />
           </motion.div>
         )}
 

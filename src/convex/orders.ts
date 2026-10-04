@@ -174,6 +174,10 @@ export const create = mutation({
     const total = Math.max(0, subtotal - discount);
     const now = Date.now();
     const number = await generateOrderNumber(ctx);
+    // Token forte de acesso do convidado ao status do pedido (usado no link
+    // `/pedido/{number}?token=...`). É a credencial que autoriza a consulta
+    // pública — o número do pedido, por si só, NÃO autoriza.
+    const accessToken = generateToken(24);
     // Normaliza strings vazias para undefined (evita "" salvo como se fosse dado real)
     for (const k of ["name", "discord", "minecraftNick", "phone", "uuid"] as const) {
       const v = (customer as any)[k];
@@ -231,7 +235,7 @@ export const create = mutation({
       paymentStatus: "pending",
       deliveryStatus: "pending",
       statusHistory: [{ status: "pending", at: now, note: "Pedido criado" }],
-      accessToken: generateToken(16),
+      accessToken,
       createdAt: now,
       updatedAt: now,
     });
@@ -285,33 +289,63 @@ export const create = mutation({
       }
     }
 
-    return { orderId, number, accessToken: undefined, total };
+    return { orderId, number, accessToken, total };
   },
 });
 
 // ─── Público ───
 
+/** Autoriza a leitura de um pedido: o cliente dono (e-mail da conta logada)
+ *  OU quem apresentar o `accessToken` do pedido. Nunca o número sozinho. */
+async function authorizeOrderView(
+  ctx: any,
+  order: { customerEmail: string; accessToken: string },
+  token: string | undefined,
+): Promise<boolean> {
+  if (typeof token === "string" && token.length > 0 && token === order.accessToken) {
+    return true;
+  }
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) return false;
+  const user = await ctx.db.get(userId);
+  return Boolean(user?.email && user.email === order.customerEmail);
+}
+
 export const getByNumber = query({
-  args: { number: v.string() },
-  handler: async (ctx, { number }) => {
+  args: { number: v.string(), token: v.optional(v.string()) },
+  handler: async (ctx, { number, token }) => {
     const order = await ctx.db
       .query("orders")
       .withIndex("by_number", (q) => q.eq("number", number))
       .first();
     if (!order) return null;
-    // dados públicos do pedido (cliente dono vê pelo número + pode receber o link)
-    return order;
-  },
-});
-
-export const listMine = query({
-  args: { email: v.string() },
-  handler: async (ctx, { email }) => {
-    const orders = await ctx.db
-      .query("orders")
-      .withIndex("by_email", (q) => q.eq("customerEmail", email))
-      .collect();
-    return orders.sort((a, b) => b.createdAt - a.createdAt);
+    // Sem autorização, não revela nem a existência do pedido.
+    if (!(await authorizeOrderView(ctx, order, token))) return null;
+    // Resposta saneada: nunca devolve accessToken, IP nem campos internos.
+    return {
+      _id: order._id,
+      number: order.number,
+      customerName: order.customerName,
+      customerEmail: order.customerEmail,
+      minecraftNick: order.minecraftNick,
+      discord: order.discord,
+      items: order.items,
+      subtotalCents: order.subtotalCents,
+      discountCents: order.discountCents,
+      totalCents: order.totalCents,
+      couponCode: order.couponCode,
+      gatewayPaymentId: order.gatewayPaymentId,
+      paymentStatus: order.paymentStatus,
+      paymentMethod: order.paymentMethod,
+      pixQrCode: order.pixQrCode,
+      pixQrCodeBase64: order.pixQrCodeBase64,
+      pixTicketUrl: order.pixTicketUrl,
+      deliveryStatus: order.deliveryStatus,
+      statusHistory: order.statusHistory,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      paidAt: order.paidAt,
+    };
   },
 });
 
@@ -369,16 +403,17 @@ export const myOrderDeliveries = query({
 });
 
 /** Entregas visíveis na página pública do pedido (sem login).
- *  O número do pedido funciona como token de acesso; só expõe itens com
- *  "mostrar ao cliente" ativado e o payload apenas quando entregue. */
+ *  Exige o `accessToken` do pedido (ou o cliente dono logado); só expõe itens
+ *  com "mostrar ao cliente" ativado e o payload apenas quando entregue. */
 export const guestDeliveries = query({
-  args: { number: v.string() },
-  handler: async (ctx, { number }) => {
+  args: { number: v.string(), token: v.optional(v.string()) },
+  handler: async (ctx, { number, token }) => {
     const order = await ctx.db
       .query("orders")
       .withIndex("by_number", (q) => q.eq("number", number))
       .first();
     if (!order) return null;
+    if (!(await authorizeOrderView(ctx, order, token))) return null;
     if (order.paymentStatus !== "paid") return [];
     const deliveries = await ctx.db
       .query("deliveries")

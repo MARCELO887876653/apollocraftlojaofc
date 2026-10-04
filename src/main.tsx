@@ -115,17 +115,27 @@ const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
 
 
+/** Sincroniza a rota com o host de preview (Freebuff) via postMessage.
+ *  Roda apenas em desenvolvimento e só aceita mensagens vindas da janela pai
+ *  (`event.source`) — em produção não expõe listener nem envia mensagens. */
 function RouteSyncer() {
   const location = useLocation();
+  const isPreview = import.meta.env.DEV;
+
   useEffect(() => {
+    if (!isPreview) return;
     window.parent.postMessage(
       { type: "iframe-route-change", path: location.pathname },
       "*",
     );
-  }, [location.pathname]);
+  }, [location.pathname, isPreview]);
 
   useEffect(() => {
+    if (!isPreview) return;
     function handleMessage(event: MessageEvent) {
+      // Ignora mensagens que não vieram da janela pai (não confia em "*" para
+      // comandos de navegação).
+      if (event.source !== window.parent) return;
       if (event.data?.type === "navigate") {
         if (event.data.direction === "back") window.history.back();
         if (event.data.direction === "forward") window.history.forward();
@@ -133,7 +143,7 @@ function RouteSyncer() {
     }
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, []);
+  }, [isPreview]);
 
   return null;
 }

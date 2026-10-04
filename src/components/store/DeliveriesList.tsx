@@ -55,16 +55,22 @@ function PayloadBox({ payload }: { payload: any }) {
  */
 export function DeliveriesList({
   number,
+  token,
   variant = "account",
   collapsible = false,
 }: {
   number: string;
+  /** Token de acesso do pedido — obrigatório na variante "guest". */
+  token?: string;
   variant?: "account" | "guest";
   collapsible?: boolean;
 }) {
-  const query =
-    variant === "guest" ? api.orders.guestDeliveries : api.orders.myOrderDeliveries;
-  const deliveries = useQuery(query, { number }) as DeliveryItem[] | null | undefined;
+  const isGuest = variant === "guest";
+  // Hook chamado incondicionalmente (regra dos hooks): só o alvo/args variam.
+  const deliveries = useQuery(
+    (isGuest ? api.orders.guestDeliveries : api.orders.myOrderDeliveries) as typeof api.orders.myOrderDeliveries,
+    isGuest ? ({ number, token: token || undefined } as any) : { number },
+  ) as DeliveryItem[] | null | undefined;
 
   if (variant === "guest" && deliveries === null) return null;
 

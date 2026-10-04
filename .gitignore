@@ -1,4 +1,7 @@
 .env.local
 node_modules
 dist
-src/convex/_generated
+
+# Convex generated types (src/convex/_generated) are intentionally committed.
+# Vercel clones the repo and runs `tsc -b`, which needs these files; Convex's own
+# docs recommend committing them ("your code won't typecheck without it").

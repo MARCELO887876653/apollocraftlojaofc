@@ -635,4 +635,67 @@ describe("roteador HTTP /api/v1", () => {
     const body = (await res.json()) as any;
     expect(body.errors[0].code).toBe("MISSING_API_KEY");
   });
+
+  test("chave inválida → 401 INVALID_API_KEY em JSON", async () => {
+    const t = convexTest(schema, modules);
+    const res = await t.fetch("/api/v1/app/me", {
+      method: "GET",
+      headers: { Authorization: "Bearer sk_live_inexistente" },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("content-type") ?? "").toContain("application/json");
+    const body = (await res.json()) as any;
+    expect(body.errors[0].code).toBe("INVALID_API_KEY");
+  });
+
+  test("rota inexistente com chave válida → 404 NOT_FOUND em JSON (nunca HTML)", async () => {
+    const t = convexTest(schema, modules);
+    const { token } = await newKey(t, FULL_SCOPES, { serverId: "GLOBAL" });
+    const res = await t.fetch("/api/v1/rota-que-nao-existe", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type") ?? "").toContain("application/json");
+    const body = (await res.json()) as any;
+    expect(body.errors[0].code).toBe("NOT_FOUND");
+  });
+
+  test("CORS: preflight OPTIONS responde 204 com origem autorizada", async () => {
+    const t = convexTest(schema, modules);
+    const res = await t.fetch("/api/v1/app/me", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://apollocraft.online",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization",
+      },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://apollocraft.online");
+    expect(res.headers.get("Vary")).toContain("Origin");
+    expect(res.headers.get("Access-Control-Allow-Methods")).toContain("GET");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
+  });
+
+  test("CORS: origem não autorizada não recebe Access-Control-Allow-Origin", async () => {
+    const t = convexTest(schema, modules);
+    const res = await t.fetch("/api/v1/app/me", {
+      method: "OPTIONS",
+      headers: { Origin: "https://site-nao-autorizado.example" },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  test("CORS: resposta autenticada inclui header para a origem da loja", async () => {
+    const t = convexTest(schema, modules);
+    const { token } = await newKey(t, ["deliveries:read"], { serverId: "GLOBAL" });
+    const res = await t.fetch("/api/v1/app/me", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}`, Origin: "https://apollocraft.online" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://apollocraft.online");
+  });
 });

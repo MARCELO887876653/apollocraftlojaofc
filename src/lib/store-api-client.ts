@@ -8,7 +8,7 @@
 //
 //   import { createStoreApi } from "./store-api-client";
 //   const storeApi = createStoreApi({
-//     baseUrl: "https://SEU-DOMINIO/api/v1",
+//     baseUrl: "https://tidy-mandrill-432.convex.site/api/v1",
 //     apiKey: "sk_live_...",
 //     serverId: "survival-01",
 //     addonId: "apollo-store",
@@ -54,7 +54,11 @@ export type DeliveryRecipe = {
 export type DeliveryStatus = "DONE" | "FAILED" | "PENDING" | "CANCELED";
 
 export type StoreApiConfig = {
-  /** Ex.: https://SEU-DOMINIO/api/v1 (nunca fixe o domínio no código). */
+  /**
+   * Base da API — HTTP actions do Convex: https://tidy-mandrill-432.convex.site/api/v1
+   * (é um endereço público, não um segredo). Em ambientes de preview/dev use o
+   * deployment correspondente (ex.: https://<dev>.convex.site/api/v1).
+   */
   baseUrl: string;
   /** sk_live_... criada no painel → Integrações → API de entregas automáticas. */
   apiKey: string;

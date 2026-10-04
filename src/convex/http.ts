@@ -8,6 +8,43 @@ const http = httpRouter();
 
 auth.addHttpRoutes(http);
 
+// ─── CORS (chamadas de navegador entre origens) ───
+// O addon (BDS/Node) NÃO precisa de CORS. Isto habilita consumidores de
+// navegador (ex.: testar /api/v1 pela página /docs/api) sem afetar em nada as
+// verificações de autenticação/autorização, que continuam rodando no servidor.
+const ALLOWED_ORIGINS = new Set([
+  "https://apollocraft.online",
+  "https://www.apollocraft.online",
+]);
+
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.has(origin)) return true;
+  try {
+    const { hostname, protocol } = new URL(origin);
+    // Preview do Freebuff e desenvolvimento local.
+    if (hostname.endsWith(".vly.sh")) return true;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return protocol === "http:" || protocol === "https:";
+    }
+  } catch {
+    // origem malformada → não autorizada
+  }
+  return false;
+}
+
+function corsHeaders(request: Request): Record<string, string> {
+  const headers: Record<string, string> = {
+    Vary: "Origin",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Api-Key, Idempotency-Key",
+    "Access-Control-Max-Age": "86400",
+  };
+  const origin = request.headers.get("origin") ?? "";
+  if (isAllowedOrigin(origin)) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
+}
+
 // ─── Webhook Mercado Pago ───
 // Sempre responde 200 rapidamente para evitar loops de retry;
 // a validação real acontece na API do gateway (nunca confiamos no payload).
@@ -112,13 +149,13 @@ const apiV1 = httpAction(async (ctx, request) => {
     });
     return Response.json(result.body ?? {}, {
       status: result.status,
-      headers: result.headers ?? {},
+      headers: { ...(result.headers ?? {}), ...corsHeaders(request) },
     });
   } catch (e) {
     console.error("[api/v1] error:", e);
     return Response.json(
       { errors: [{ message: "Erro interno no servidor.", code: "INTERNAL_ERROR" }] },
-      { status: 500 },
+      { status: 500, headers: corsHeaders(request) },
     );
   }
 });
@@ -130,5 +167,15 @@ for (const method of ["GET", "POST", "PATCH", "PUT", "DELETE"] as const) {
     handler: apiV1,
   });
 }
+
+// Preflight CORS: responde ANTES de qualquer autenticação (o navegador não
+// envia credenciais no OPTIONS) e nunca toca em dados.
+http.route({
+  pathPrefix: "/api/v1/",
+  method: "OPTIONS",
+  handler: httpAction(async (_ctx, request) => {
+    return new Response(null, { status: 204, headers: corsHeaders(request) });
+  }),
+});
 
 export default http;

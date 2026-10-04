@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "description": "API própria de entregas automáticas e catálogo bidirecional para addons Minecraft Bedrock. Autenticação por `Authorization: Bearer sk_live_...` ou `X-Api-Key` (BDS). Erros no formato { errors: [{ message, code }] }."
   },
-  "servers": [{ "url": "/api/v1", "description": "Mesma origem da loja" }],
+  "servers": [{ "url": "https://tidy-mandrill-432.convex.site/api/v1", "description": "HTTP actions do Convex (backend de produção da loja)" }],
   "security": [{ "bearerAuth": [] }, { "apiKeyAuth": [] }],
   "components": {
     "securitySchemes": {

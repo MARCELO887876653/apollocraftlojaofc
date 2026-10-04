@@ -47,6 +47,9 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function AdminTeam() {
   const members = useQuery(api.team.list) as Member[] | undefined;
+  const me = useQuery(api.team.me);
+  const isOwner = me?.admin?.role === "owner";
+  const ownerCount = (members ?? []).filter((m) => m.role === "owner" && m.active).length;
   const [editing, setEditing] = useState<{ id: string | null; email: string; name: string; role: string; permissions: string[] } | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -138,12 +141,12 @@ export default function AdminTeam() {
                   </td>
                   <td className="px-4 py-3">
                     <label className="flex items-center gap-2 text-xs">
-                      <Switch checked={m.active} onCheckedChange={() => toggleActive(m)} disabled={m.role === "owner"} />
+                      <Switch checked={m.active} onCheckedChange={() => toggleActive(m)} disabled={m.role === "owner" && (!isOwner || ownerCount <= 1)} />
                       {m.active ? "Ativo" : "Inativo"}
                     </label>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {m.role !== "owner" && (
+                    {(m.role !== "owner" || (isOwner && ownerCount > 1)) && (
                       <div className="flex justify-end">
                         <Button variant="ghost" size="icon" onClick={() => openEdit(m)}><Pencil className="size-4" /></Button>
                         <Button variant="ghost" size="icon" className="text-red-600" onClick={() => del(m)}><Trash2 className="size-4" /></Button>
@@ -184,12 +187,19 @@ export default function AdminTeam() {
                 <Select value={editing.role} onValueChange={(v) => setEditing({ ...editing, role: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {Object.entries(ROLE_LABELS).filter(([k]) => k !== "owner").map(([k, label]) => (
-                      <SelectItem key={k} value={k}>{label}</SelectItem>
-                    ))}
+                    {Object.entries(ROLE_LABELS)
+                      .filter(([k]) => k !== "owner" || isOwner)
+                      .map(([k, label]) => (
+                        <SelectItem key={k} value={k}>{label}</SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
+              {editing.role === "owner" && (
+                <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">
+                  <strong>Dono (owner):</strong> acesso total a tudo, incluindo a equipe. Só conceda a pessoas que você confia completamente.
+                </p>
+              )}
               {editing.role === "custom" && (
                 <div className="rounded-lg border p-3">
                   <Label className="mb-2 block">Permissões</Label>

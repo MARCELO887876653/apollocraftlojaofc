@@ -2,8 +2,14 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import {
-  requireAdmin, logAudit, hasPermission, ALL_PERMISSIONS, ROLE_PRESETS,
+  requireAdmin, logAudit, hasPermission, ALL_PERMISSIONS, ROLE_PRESETS, AdminError,
 } from "./lib/admin";
+
+/** Conta quantos donos (owners) ativos existem — usado para nunca deixar o sistema sem dono. */
+async function countActiveOwners(ctx: any): Promise<number> {
+  const all = await ctx.db.query("adminUsers").collect();
+  return all.filter((a: any) => a.role === "owner" && a.active).length;
+}
 
 // ─────────────────────────────────────────────────────────────
 // Equipe administrativa (RBAC) — owner gerencia tudo
@@ -67,6 +73,21 @@ export const upsert = mutation({
       .query("adminUsers")
       .withIndex("by_email", (q) => q.eq("email", normalized))
       .first();
+
+    // Somente um dono pode conceder/gerenciar o cargo de dono.
+    const callerIsOwner = admin.role === "owner";
+    if (role === "owner" && !callerIsOwner) {
+      throw new AdminError("FORBIDDEN", "Somente o dono pode conceder o cargo de dono.");
+    }
+    if (existing && existing.role === "owner" && !callerIsOwner) {
+      throw new AdminError("FORBIDDEN", "Somente o dono pode alterar outro dono.");
+    }
+    // Nunca deixar o sistema sem nenhum dono ativo.
+    if (existing && existing.role === "owner" && role !== "owner") {
+      if ((await countActiveOwners(ctx)) <= 1) {
+        throw new AdminError("FORBIDDEN", "Não é possível rebaixar o último dono ativo.");
+      }
+    }
     const perms =
       role === "owner"
         ? ALL_PERMISSIONS
@@ -98,8 +119,12 @@ export const setActive = mutation({
     const admin = await requireAdmin(ctx, "team.manage");
     const target = await ctx.db.get(id);
     if (!target) throw new Error("Membro não encontrado");
-    if (target.role === "owner" && !active)
-      throw new Error("O owner não pode ser desativado");
+    if (target.role === "owner" && !active) {
+      if (admin.role !== "owner")
+        throw new AdminError("FORBIDDEN", "Somente o dono pode desativar outro dono.");
+      if ((await countActiveOwners(ctx)) <= 1)
+        throw new AdminError("FORBIDDEN", "O último dono ativo não pode ser desativado.");
+    }
     await ctx.db.patch(id, { active });
     await logAudit(ctx, admin, "team.set_active", "adminUser", id, { active });
   },
@@ -111,7 +136,12 @@ export const remove = mutation({
     const admin = await requireAdmin(ctx, "team.manage");
     const target = await ctx.db.get(id);
     if (!target) return;
-    if (target.role === "owner") throw new Error("O owner não pode ser removido");
+    if (target.role === "owner") {
+      if (admin.role !== "owner")
+        throw new AdminError("FORBIDDEN", "Somente o dono pode remover outro dono.");
+      if ((await countActiveOwners(ctx)) <= 1)
+        throw new AdminError("FORBIDDEN", "O último dono ativo não pode ser removido.");
+    }
     await ctx.db.delete(id);
     await logAudit(ctx, admin, "team.remove", "adminUser", id, { email: target.email });
   },

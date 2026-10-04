@@ -16,13 +16,25 @@ import {
 
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
-import { ArrowRight, Loader2, Mail, UserX } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Loader2,
+  Mail,
+  MailCheck,
+  RefreshCw,
+  ShieldCheck,
+  UserX,
+} from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
 interface AuthProps {
   redirectAfterAuth?: string;
 }
+
+const RESEND_SECONDS = 60;
 
 function resolveRedirectAfterAuth(
   returnTo: string | null,
@@ -45,28 +57,44 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [step, setStep] = useState<"signIn" | { email: string }>("signIn");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendIn, setResendIn] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
       navigate(redirect);
     }
   }, [authLoading, isAuthenticated, navigate, redirect]);
+
+  // Contagem regressiva para liberar o botão de reenvio do código.
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendIn]);
+
   const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
+    setNotice(null);
     try {
       const formData = new FormData(event.currentTarget);
+      const email = String(formData.get("email") ?? "").trim();
       await signIn("email-otp", formData);
-      setStep({ email: formData.get("email") as string });
+      setStep({ email });
+      setOtp("");
+      setResendIn(RESEND_SECONDS);
+      setNotice("Código enviado! Você pode conferir sua caixa de entrada.");
       setIsLoading(false);
     } catch (error) {
       console.error("Email sign-in error:", error);
       setError(
         error instanceof Error
           ? error.message
-          : "Failed to send verification code. Please try again.",
+          : "Não foi possível enviar o código. Tente novamente.",
       );
       setIsLoading(false);
     }
@@ -76,133 +104,186 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
+    setNotice(null);
     try {
       const formData = new FormData(event.currentTarget);
       await signIn("email-otp", formData);
-
-      console.log("signed in");
-
       navigate(redirect);
     } catch (error) {
       console.error("OTP verification error:", error);
-
-      setError("The verification code you entered is incorrect.");
+      setError("O código informado está incorreto ou expirou. Confira e tente novamente.");
       setIsLoading(false);
-
       setOtp("");
+    }
+  };
+
+  const handleResend = async () => {
+    if (typeof step === "string" || resendIn > 0 || isResending) return;
+    setIsResending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const formData = new FormData();
+      formData.append("email", step.email);
+      await signIn("email-otp", formData);
+      setOtp("");
+      setResendIn(RESEND_SECONDS);
+      setNotice("Enviamos um novo código para o seu e-mail.");
+    } catch (error) {
+      console.error("Resend OTP error:", error);
+      setError("Não foi possível reenviar o código agora. Tente novamente.");
+    } finally {
+      setIsResending(false);
     }
   };
 
   const handleGuestLogin = async () => {
     setIsLoading(true);
     setError(null);
+    setNotice(null);
     try {
-      console.log("Attempting anonymous sign in...");
       await signIn("anonymous");
-      console.log("Anonymous sign in successful");
       navigate(redirect);
     } catch (error) {
       console.error("Guest login error:", error);
-      console.error("Error details:", JSON.stringify(error, null, 2));
-      setError(`Failed to sign in as guest: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setError(
+        `Não foi possível entrar como visitante: ${
+          error instanceof Error ? error.message : "erro desconhecido"
+        }`,
+      );
       setIsLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen flex flex-col">
+  const goBackToEmail = () => {
+    setStep("signIn");
+    setOtp("");
+    setError(null);
+    setNotice(null);
+  };
 
-      
-      {/* Auth Content */}
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex items-center justify-center h-full flex-col">
-        <Card className="min-w-[350px] pb-0 border shadow-md">
+  return (
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">
+      {/* Luz de fundo no tom da marca */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute -top-44 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-primary/25 blur-[130px]" />
+        <div className="absolute -bottom-40 -right-24 h-[420px] w-[420px] rounded-full bg-primary/10 blur-[130px]" />
+      </div>
+
+      <div className="w-full max-w-[420px]">
+        <Card className="overflow-hidden border-border/70 bg-card/80 shadow-2xl backdrop-blur-xl">
+          <div className="h-1 w-full bg-gradient-to-r from-transparent via-primary to-transparent" />
+
           {step === "signIn" ? (
             <>
-              <CardHeader className="text-center">
-              <div className="flex justify-center">
-                    <img
-                      src={logo}
-                      alt="Lock Icon"
-                      width={64}
-                      height={64}
-                      className="rounded-lg mb-4 mt-4 cursor-pointer"
-                      onClick={() => navigate("/")}
-                    />
-                  </div>
-                <CardTitle className="text-xl">Get Started</CardTitle>
-                <CardDescription>
-                  Enter your email to log in or sign up
-                </CardDescription>
+              <CardHeader className="gap-3 text-center">
+                <div className="flex justify-center">
+                  <img
+                    src={logo}
+                    alt="Apollo Craft"
+                    width={64}
+                    height={64}
+                    className="mt-2 cursor-pointer rounded-xl transition-transform hover:scale-105"
+                    onClick={() => navigate("/")}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-2xl font-bold tracking-tight">
+                    Acessar a Apollo Craft
+                  </CardTitle>
+                  <CardDescription className="text-pretty">
+                    Informe seu e-mail para receber um código de acesso. Sem senha,
+                    rápido e seguro.
+                  </CardDescription>
+                </div>
               </CardHeader>
               <form onSubmit={handleEmailSubmit}>
-                <CardContent>
-                  
-                  <div className="relative flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        name="email"
-                        placeholder="name@example.com"
-                        type="email"
-                        className="pl-9"
-                        disabled={isLoading}
-                        required
-                      />
-                    </div>
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      size="icon"
+                <CardContent className="space-y-4 pb-2">
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      name="email"
+                      placeholder="seu@email.com"
+                      type="email"
+                      autoComplete="email"
+                      className="h-11 pl-9"
                       disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <ArrowRight className="h-4 w-4" />
-                      )}
-                    </Button>
+                      required
+                    />
                   </div>
+
                   {error && (
-                    <p className="mt-2 text-sm text-red-500">{error}</p>
+                    <p className="text-sm text-destructive">{error}</p>
                   )}
-                  
-                  <div className="mt-4">
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <span className="w-full border-t" />
-                      </div>
-                      <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-background px-2 text-muted-foreground">
-                          Or
-                        </span>
-                      </div>
+
+                  <Button
+                    type="submit"
+                    size="lg"
+                    className="w-full"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Enviando código...
+                      </>
+                    ) : (
+                      <>
+                        Enviar código de acesso
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
+
+                  <div className="relative py-1">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
                     </div>
-                    
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full mt-4"
-                      onClick={handleGuestLogin}
-                      disabled={isLoading}
-                    >
-                      <UserX className="mr-2 h-4 w-4" />
-                      Continue as Guest
-                    </Button>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-card px-2 text-muted-foreground">
+                        ou
+                      </span>
+                    </div>
                   </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="lg"
+                    className="w-full"
+                    onClick={handleGuestLogin}
+                    disabled={isLoading}
+                  >
+                    <UserX className="mr-2 h-4 w-4" />
+                    Continuar como visitante
+                  </Button>
                 </CardContent>
               </form>
             </>
           ) : (
             <>
-              <CardHeader className="text-center mt-4">
-                <CardTitle>Check your email</CardTitle>
-                <CardDescription>
-                  We've sent a code to {step.email}
-                </CardDescription>
+              <CardHeader className="gap-3 pb-2 text-center">
+                <div className="flex justify-center">
+                  <div className="neon-glow flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/15 text-primary">
+                    <MailCheck className="h-7 w-7" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-xl font-bold tracking-tight">
+                    Verifique seu e-mail
+                  </CardTitle>
+                  <CardDescription className="text-pretty">
+                    Enviamos um código de 6 dígitos para{" "}
+                    <span className="font-medium text-foreground">
+                      {step.email}
+                    </span>
+                    .
+                  </CardDescription>
+                </div>
               </CardHeader>
+
               <form onSubmit={handleOtpSubmit}>
-                <CardContent className="pb-4">
+                <CardContent className="space-y-4 pb-2">
                   <input type="hidden" name="email" value={step.email} />
                   <input type="hidden" name="code" value={otp} />
 
@@ -212,84 +293,114 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       onChange={setOtp}
                       maxLength={6}
                       disabled={isLoading}
+                      autoFocus
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && otp.length === 6 && !isLoading) {
-                          // Find the closest form and submit it
                           const form = (e.target as HTMLElement).closest("form");
-                          if (form) {
-                            form.requestSubmit();
-                          }
+                          if (form) form.requestSubmit();
                         }
                       }}
                     >
-                      <InputOTPGroup>
+                      <InputOTPGroup className="gap-2">
                         {Array.from({ length: 6 }).map((_, index) => (
-                          <InputOTPSlot key={index} index={index} />
+                          <InputOTPSlot
+                            key={index}
+                            index={index}
+                            className="h-12 w-11 rounded-lg border text-lg font-semibold"
+                          />
                         ))}
                       </InputOTPGroup>
                     </InputOTP>
                   </div>
+
+                  <p className="flex items-start justify-center gap-1.5 text-center text-xs text-muted-foreground">
+                    <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                    O e-mail normalmente chega em até 1 minuto. Confira também a
+                    caixa de spam ou lixo eletrônico.
+                  </p>
+
+                  {notice && (
+                    <p className="flex items-center justify-center gap-1.5 text-center text-sm text-emerald-500">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" />
+                      {notice}
+                    </p>
+                  )}
+
                   {error && (
-                    <p className="mt-2 text-sm text-red-500 text-center">
+                    <p className="text-center text-sm text-destructive">
                       {error}
                     </p>
                   )}
-                  <p className="text-sm text-muted-foreground text-center mt-4">
-                    Didn't receive a code?{" "}
-                    <Button
-                      variant="link"
-                      className="p-0 h-auto"
-                      onClick={() => setStep("signIn")}
-                    >
-                      Try again
-                    </Button>
-                  </p>
                 </CardContent>
-                <CardFooter className="flex-col gap-2">
+
+                <CardFooter className="flex-col gap-3">
                   <Button
                     type="submit"
+                    size="lg"
                     className="w-full"
                     disabled={isLoading || otp.length !== 6}
                   >
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Verifying...
+                        Verificando...
                       </>
                     ) : (
                       <>
-                        Verify code
+                        Verificar e entrar
                         <ArrowRight className="ml-2 h-4 w-4" />
                       </>
                     )}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setStep("signIn")}
-                    disabled={isLoading}
-                    className="w-full"
-                  >
-                    Use different email
-                  </Button>
+
+                  <div className="flex w-full items-center justify-between text-sm">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="-ml-2 text-muted-foreground"
+                      onClick={goBackToEmail}
+                      disabled={isLoading || isResending}
+                    >
+                      <ArrowLeft className="mr-1.5 h-4 w-4" />
+                      Trocar e-mail
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="px-0"
+                      onClick={handleResend}
+                      disabled={isLoading || isResending || resendIn > 0}
+                    >
+                      <RefreshCw
+                        className={`mr-1.5 h-3.5 w-3.5 ${
+                          isResending ? "animate-spin" : ""
+                        }`}
+                      />
+                      {resendIn > 0
+                        ? `Reenviar em ${resendIn}s`
+                        : "Reenviar código"}
+                    </Button>
+                  </div>
                 </CardFooter>
               </form>
             </>
           )}
 
-          <div className="py-4 px-6 text-xs text-center text-muted-foreground bg-muted border-t rounded-b-lg">
-            Secured by{" "}
+          <div className="border-t bg-muted/40 px-6 py-4 text-center text-xs text-muted-foreground">
+            Protegido por{" "}
             <a
               href="https://freebuff.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="underline hover:text-primary transition-colors"
+              className="underline transition-colors hover:text-primary"
             >
               freebuff.com
             </a>
           </div>
         </Card>
-        </div>
       </div>
     </div>
   );

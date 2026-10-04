@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import {
   Loader2, CheckCircle2, XCircle, CreditCard, Gamepad2, KeyRound, Copy,
   Plus, Trash2, RefreshCw, Server, ShieldCheck, Ban, Activity, Plug,
+  Webhook, Send, Pencil,
 } from "lucide-react";
 
 type Integrations = {
@@ -163,6 +164,8 @@ export default function AdminIntegrations() {
         </CardContent>
       </Card>
 
+      <WebhooksSection />
+
       <ApiV1Section />
 
       <ApiV1Diagnostics />
@@ -171,6 +174,344 @@ export default function AdminIntegrations() {
   );
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// Webhooks de saída (notificações para Discord e outros sistemas)
+// ─────────────────────────────────────────────────────────────
+
+const WEBHOOK_EVENTS: Array<{ value: string; label: string }> = [
+  { value: "order.created", label: "Pedido criado" },
+  { value: "order.paid", label: "Pedido aprovado" },
+  { value: "order.delivered", label: "Pedido entregue" },
+  { value: "order.cancelled", label: "Pedido cancelado" },
+  { value: "delivery.failed", label: "Falha na entrega" },
+  { value: "test", label: "Teste" },
+];
+
+const ALL_EVENTS = "*";
+
+const eventLabel = (value: string) =>
+  value === ALL_EVENTS
+    ? "Todos os eventos"
+    : WEBHOOK_EVENTS.find((e) => e.value === value)?.label ?? value;
+
+type WebhookRow = {
+  _id: string; name?: string; url: string; events: string[];
+  active: boolean; failureCount: number; createdAt: number;
+};
+
+type WebhookLogRow = {
+  _id: string; event: string; url: string; statusCode?: number;
+  error?: string; attempt: number; createdAt: number;
+};
+
+type WebhookAdminData = {
+  hooks: WebhookRow[];
+  logs: WebhookLogRow[];
+  stats: { deliveries24h: number; successRate: number | null };
+};
+
+function StatusBadge({ log }: { log: WebhookLogRow }) {
+  if (log.error) {
+    return <Badge variant="outline" className="border-red-500/40 text-red-600">Erro</Badge>;
+  }
+  const ok = typeof log.statusCode === "number" && log.statusCode >= 200 && log.statusCode < 300;
+  return (
+    <Badge
+      className={
+        ok
+          ? "bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/15"
+          : "bg-red-500/15 text-red-700 hover:bg-red-500/15"
+      }
+    >
+      {log.statusCode ?? "—"}
+    </Badge>
+  );
+}
+
+function WebhooksSection() {
+  const data = useQuery(api.webhooksOutData.adminList) as WebhookAdminData | undefined;
+  const save = useMutation(api.webhooksOutData.save);
+  const remove = useMutation(api.webhooksOutData.remove);
+  const test = useAction(api.webhooksTest.test);
+
+  const [editing, setEditing] = useState<
+    { id: string | null; name: string; url: string; events: string[] } | null
+  >(null);
+  const [showDeliveries, setShowDeliveries] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+
+  const openNew = () => setEditing({ id: null, name: "", url: "", events: [] });
+  const openEdit = (hook: WebhookRow) =>
+    setEditing({ id: hook._id, name: hook.name ?? "", url: hook.url, events: hook.events });
+
+  const toggleEvent = (value: string) => {
+    setEditing((cur) => {
+      if (!cur) return cur;
+      const on = cur.events.includes(value);
+      return { ...cur, events: on ? cur.events.filter((e) => e !== value) : [...cur.events, value] };
+    });
+  };
+
+  const canCreate =
+    !!editing && editing.name.trim().length > 0 && /^https:\/\/\S+/i.test(editing.url.trim());
+
+  const submit = async () => {
+    if (!editing || !canCreate) return;
+    setSaving(true);
+    try {
+      await save({
+        id: (editing.id as any) ?? undefined,
+        data: {
+          name: editing.name.trim(),
+          url: editing.url.trim(),
+          secret: editing.id ? undefined : crypto.randomUUID(),
+          events: editing.events.length ? editing.events : [ALL_EVENTS],
+          active: true,
+        },
+      });
+      toast.success(editing.id ? "Webhook atualizado" : "Webhook criado");
+      setEditing(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const runTest = async (hook: WebhookRow) => {
+    setTestingId(hook._id);
+    try {
+      const res = await test({ id: hook._id as any });
+      if (res.ok) toast.success(`Entrega OK (${res.status})`);
+      else toast.error(`O endpoint respondeu ${res.status}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao testar");
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Webhook className="size-5 text-primary" />
+          <CardTitle className="text-base">Webhooks</CardTitle>
+        </div>
+        <CardDescription>
+          Gerencie os webhooks da sua loja. Ao informar a URL de um webhook do Discord
+          (discord.com/api/webhooks/...), os eventos são enviados como embed.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setShowDeliveries(true)}>
+            <Activity className="mr-2 size-4" /> Ver entregas
+          </Button>
+          <Button onClick={openNew}>
+            <Plus className="mr-2 size-4" /> Novo webhook
+          </Button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border bg-card p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Entregas (24h)</p>
+              <Activity className="size-4 text-muted-foreground" />
+            </div>
+            <p className="mt-2 text-3xl font-extrabold tracking-tight">
+              {data ? data.stats.deliveries24h : "—"}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">Envios feitos nas últimas 24 horas.</p>
+          </div>
+          <div className="rounded-xl border bg-card p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Taxa de sucesso</p>
+              <ShieldCheck className="size-4 text-muted-foreground" />
+            </div>
+            <p className="mt-2 text-3xl font-extrabold tracking-tight">
+              {data?.stats.successRate == null ? "—" : `${data.stats.successRate}%`}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">Respostas 2xx nas entregas de 24h.</p>
+          </div>
+        </div>
+
+        <Separator />
+
+        {data === undefined ? (
+          <Loader2 className="mx-auto size-5 animate-spin" />
+        ) : data.hooks.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">
+            Nenhum webhook configurado. Clique em “Novo webhook” para começar.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {data.hooks.map((hook) => (
+              <div key={hook._id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2.5">
+                <Webhook className="size-4 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{hook.name || hook.url}</p>
+                  <p className="truncate text-xs text-muted-foreground">{hook.url}</p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {(hook.events.length ? hook.events : [ALL_EVENTS]).map((e) => (
+                      <span key={e} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        {eventLabel(e)}
+                      </span>
+                    ))}
+                    {hook.failureCount > 0 && (
+                      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700">
+                        {hook.failureCount} falha(s)
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={testingId === hook._id}
+                  onClick={() => runTest(hook)}
+                >
+                  {testingId === hook._id ? (
+                    <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                  ) : (
+                    <Send className="mr-1.5 size-3.5" />
+                  )}
+                  Testar
+                </Button>
+                <Button variant="ghost" size="icon" className="size-8" aria-label="Editar webhook" onClick={() => openEdit(hook)}>
+                  <Pencil className="size-3.5" />
+                </Button>
+                <Switch
+                  checked={hook.active}
+                  onCheckedChange={(v) =>
+                    save({
+                      id: hook._id as any,
+                      data: { name: hook.name, url: hook.url, events: hook.events, active: v },
+                    }).catch((e) => toast.error(e.message))
+                  }
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 text-red-600"
+                  aria-label="Excluir webhook"
+                  onClick={async () => {
+                    if (!confirm("Excluir este webhook?")) return;
+                    try {
+                      await remove({ id: hook._id as any });
+                      toast.success("Webhook excluído");
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : "Erro");
+                    }
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+
+      {/* Criar/editar webhook */}
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editing?.id ? "Editar webhook" : "Criar webhook"}</DialogTitle>
+            <DialogDescription>
+              Configure um novo webhook para receber notificações.
+            </DialogDescription>
+          </DialogHeader>
+          {editing && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Nome</Label>
+                <Input
+                  value={editing.name}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                  placeholder="Ex: Meu servidor"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>URL (HTTPS)</Label>
+                <Input
+                  value={editing.url}
+                  onChange={(e) => setEditing({ ...editing, url: e.target.value })}
+                  placeholder="https://exemplo.com/webhook"
+                  inputMode="url"
+                />
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <Label>Eventos</Label>
+                <div className="space-y-2">
+                  {[...WEBHOOK_EVENTS].map((ev) => (
+                    <div
+                      key={ev.value}
+                      className="flex items-center justify-between rounded-xl border bg-card px-4 py-3"
+                    >
+                      <span className="text-sm font-medium">{ev.label}</span>
+                      <Switch
+                        checked={editing.events.includes(ev.value)}
+                        onCheckedChange={() => toggleEvent(ev.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="outline" onClick={() => setEditing(null)}>
+                  Cancelar
+                </Button>
+                <Button onClick={submit} disabled={!canCreate || saving}>
+                  {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+                  {editing.id ? "Salvar" : "Criar"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Entregas recentes */}
+      <Dialog open={showDeliveries} onOpenChange={setShowDeliveries}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Entregas</DialogTitle>
+            <DialogDescription>Últimas chamadas feitas aos seus webhooks.</DialogDescription>
+          </DialogHeader>
+          {!data ? (
+            <Loader2 className="mx-auto size-5 animate-spin" />
+          ) : data.logs.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma entrega registrada ainda.</p>
+          ) : (
+            <div className="space-y-2">
+              {data.logs.map((log) => (
+                <div key={log._id} className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{eventLabel(log.event)}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {log.url} · {new Date(log.createdAt).toLocaleString("pt-BR")}
+                    </p>
+                    {log.error && (
+                      <p className="truncate text-xs text-red-600">{log.error}</p>
+                    )}
+                  </div>
+                  <StatusBadge log={log} />
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────
 // API v1 — chaves com permissões (scopes), servidor e token 1x

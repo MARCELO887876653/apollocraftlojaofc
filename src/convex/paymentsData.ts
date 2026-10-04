@@ -116,5 +116,14 @@ export async function transitionOrder(ctx: any, order: any, mpStatus: string) {
       orderId: order._id,
       reason: `Pagamento ${mpStatus} pelo gateway`,
     });
+    await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
+      event: "order.cancelled",
+      payload: {
+        orderNumber: order.number,
+        status: mpStatus,
+        total: order.totalCents / 100,
+        customerEmail: order.customerEmail,
+      },
+    });
   }
 }

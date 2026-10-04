@@ -250,6 +250,18 @@ export const create = mutation({
       });
     }
 
+    // webhooks de saída: pedido criado
+    await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
+      event: "order.created",
+      payload: {
+        orderNumber: number,
+        total: total / 100,
+        customerEmail: customer.email,
+        customerName: customer.name ?? customer.email?.split("@")[0],
+        items: orderItems.map((i: any) => ({ name: i.name, variant: i.variantName, quantity: i.quantity })),
+      },
+    });
+
     // vendas + criação da fila de entrega
     for (const item of orderItems) {
       const product: any = await ctx.db.get(item.productId);
@@ -497,6 +509,15 @@ export const adminUpdateStatus = mutation({
         orderId: id,
         reason: `Pedido ${paymentStatus} (${admin.name})`,
       });
+      await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
+        event: "order.cancelled",
+        payload: {
+          orderNumber: order.number,
+          status: paymentStatus,
+          total: order.totalCents / 100,
+          customerEmail: order.customerEmail,
+        },
+      });
     }
     await logAudit(ctx, admin, "order.status_update", "order", id, { paymentStatus });
   },
@@ -539,6 +560,15 @@ export const adminCancel = mutation({
       deliveryStatus: "pending",
       updatedAt: now,
       statusHistory: [...order.statusHistory, { status: "cancelled", at: now, note: `Cancelado por ${admin.name}` }],
+    });
+    await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
+      event: "order.cancelled",
+      payload: {
+        orderNumber: order.number,
+        status: "cancelled",
+        total: order.totalCents / 100,
+        customerEmail: order.customerEmail,
+      },
     });
     await logAudit(ctx, admin, "order.cancel", "order", id);
   },

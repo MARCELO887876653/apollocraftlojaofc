@@ -368,6 +368,7 @@ const schema = defineSchema(
     }).index("by_prefix", ["prefix"]),
 
     webhooksOut: defineTable({
+      name: v.optional(v.string()),
       url: v.string(),
       secret: v.string(),
       events: v.array(v.string()),

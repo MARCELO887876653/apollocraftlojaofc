@@ -5,7 +5,8 @@ import { Link } from "react-router";
 import { toast } from "sonner";
 import {
   ShoppingBag, ShieldCheck, List, ArrowRight, Send, Headphones, Swords,
-  Terminal, Copy, Trophy, Crown, User, Wallet, Star, HelpCircle,
+  Terminal, Copy, Trophy, Crown, User, Wallet, Star, HelpCircle, Zap,
+  CreditCard, LifeBuoy,
 } from "lucide-react";
 import {
   Accordion,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { ProductCard } from "@/components/store/ProductCard";
+import { StoreLayout } from "@/components/store/StoreLayout";
 import { VisitTracker } from "@/components/store/VisitTracker";
 import { formatBRL } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -143,6 +145,21 @@ function Hero() {
             </motion.div>
           )}
         </motion.div>
+        <motion.ul
+          variants={fadeUp}
+          className="flex flex-wrap items-center gap-x-6 gap-y-3 pt-3 text-sm text-muted-foreground"
+        >
+          {[
+            { icon: Zap, label: "Entrega automática 24/7" },
+            { icon: CreditCard, label: "Pagamento instantâneo via PIX" },
+            { icon: LifeBuoy, label: "Suporte humano de verdade" },
+          ].map((item) => (
+            <li key={item.label} className="flex items-center gap-2">
+              <item.icon className="size-4 text-sky-400" />
+              <span>{item.label}</span>
+            </li>
+          ))}
+        </motion.ul>
       </motion.div>
     </section>
   );
@@ -474,7 +491,7 @@ export default function Home() {
   const homepage = (useQuery(api.settings.getHomepage) as Section[] | undefined) ?? [];
 
   return (
-    <>
+    <StoreLayout>
       <VisitTracker />
       {homepage
         .filter((s) => s.enabled)
@@ -505,7 +522,7 @@ export default function Home() {
               return null;
           }
         })}
-    </>
+    </StoreLayout>
   );
 }
 

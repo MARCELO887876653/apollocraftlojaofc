@@ -42,6 +42,7 @@ import type * as orders from "../orders.js";
 import type * as payments from "../payments.js";
 import type * as paymentsData from "../paymentsData.js";
 import type * as products from "../products.js";
+import type * as profile from "../profile.js";
 import type * as settings from "../settings.js";
 import type * as stats from "../stats.js";
 import type * as team from "../team.js";
@@ -91,6 +92,7 @@ declare const fullApi: ApiFromModules<{
   payments: typeof payments;
   paymentsData: typeof paymentsData;
   products: typeof products;
+  profile: typeof profile;
   settings: typeof settings;
   stats: typeof stats;
   team: typeof team;

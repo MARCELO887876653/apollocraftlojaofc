@@ -115,39 +115,61 @@ function renderOtpText(code: string, expiresMinutes: number) {
   ].join("\n");
 }
 
+/**
+ * Remetentes testados em ordem, do mais profissional ao mais permissivo:
+ *
+ *  1. `RESEND_FROM`, quando a loja define um endereço próprio;
+ *  2. o domínio da loja — só funciona depois que apollocraft.online estiver
+ *     verificado na Resend (registros DNS);
+ *  3. `onboarding@resend.dev` — sandbox da Resend, que entrega apenas para o
+ *     e-mail dono da conta.
+ *
+ * Assim o e-mail sai em português sempre que houver QUALQUER caminho válido,
+ * sem depender de a loja configurar `RESEND_FROM`.
+ */
+function resendFromCandidates(): string[] {
+  const candidates = [
+    process.env.RESEND_FROM,
+    `${APP_NAME} <${SUPPORT_EMAIL}>`,
+    `${APP_NAME} <onboarding@resend.dev>`,
+  ].filter((value): value is string => Boolean(value));
+  return Array.from(new Set(candidates));
+}
+
 /** Envia o código pela API da Resend (REST simples, sem SDK). */
 async function sendWithResend(to: string, code: string) {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return false;
-
-  const from =
-    process.env.RESEND_FROM || `${APP_NAME} <onboarding@resend.dev>`;
-
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: [to],
-      subject: `${code} é o seu código de acesso à ${APP_NAME}`,
-      html: renderOtpEmail({
-        appName: APP_NAME,
-        code,
-        expiresMinutes: EXPIRES_MINUTES,
-      }),
-      text: renderOtpText(code, EXPIRES_MINUTES),
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Resend falhou (${response.status}): ${body}`);
+  if (!apiKey) {
+    console.warn(
+      "RESEND_API_KEY não configurada: o código de acesso será enviado pelo fallback do Freebuff (e-mail em inglês).",
+    );
+    return false;
   }
 
-  return true;
+  const subject = `${code} é o seu código de acesso à ${APP_NAME}`;
+  const html = renderOtpEmail({
+    appName: APP_NAME,
+    code,
+    expiresMinutes: EXPIRES_MINUTES,
+  });
+  const text = renderOtpText(code, EXPIRES_MINUTES);
+
+  const failures: string[] = [];
+  for (const from of resendFromCandidates()) {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ from, to: [to], subject, html, text }),
+    });
+
+    if (response.ok) return true;
+    failures.push(`"${from}" -> ${response.status} ${await response.text()}`);
+  }
+
+  throw new Error(`Resend falhou em todos os remetentes: ${failures.join(" | ")}`);
 }
 
 /** Serviço de e-mail do Freebuff — usado apenas como fallback. */

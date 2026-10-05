@@ -2,7 +2,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { ConvexReactClient } from "convex/react";
+import { ConvexReactClient, useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
@@ -120,6 +121,53 @@ class RootErrorBoundary extends React.Component<
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
+/**
+ * Troca o ícone da aba pela imagem cadastrada pela loja (Configurações → Loja)
+ * assim que ela existir, dando preferência ao favicon próprio e caindo no logo
+ * quando ele não estiver definido. Sem nada cadastrado, mantém a marca Apollo
+ * embutida no projeto.
+ */
+function StoreFavicon() {
+  const store = useQuery(api.settings.getStore) as
+    | { logoUrl?: string; faviconUrl?: string }
+    | undefined;
+  const iconUrl = store?.faviconUrl || store?.logoUrl;
+
+  useEffect(() => {
+    if (!iconUrl) return;
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) return;
+    const previousHref = link.getAttribute("href");
+    const previousType = link.getAttribute("type");
+    // As URLs do Convex Storage não têm extensão: nesse caso deixamos o
+    // navegador identificar o formato pelo Content-Type da resposta.
+    const extension = iconUrl.split("?")[0].split(".").pop()?.toLowerCase();
+    const mimeType =
+      extension === "svg"
+        ? "image/svg+xml"
+        : extension === "ico"
+          ? "image/x-icon"
+          : extension === "webp"
+            ? "image/webp"
+            : extension === "jpg" || extension === "jpeg"
+              ? "image/jpeg"
+              : extension === "png"
+                ? "image/png"
+                : null;
+
+    link.setAttribute("href", iconUrl);
+    if (mimeType) link.setAttribute("type", mimeType);
+    else link.removeAttribute("type");
+
+    return () => {
+      if (previousHref) link.setAttribute("href", previousHref);
+      if (previousType) link.setAttribute("type", previousType);
+    };
+  }, [iconUrl]);
+
+  return null;
+}
+
 
 
 /** Sincroniza a rota com o host de preview (Freebuff) via postMessage.
@@ -169,6 +217,7 @@ createRoot(document.getElementById("root")!).render(
           <CartProvider>
             <BrowserRouter>
               <RouteSyncer />
+              <StoreFavicon />
               <Suspense fallback={<RouteLoading />}>
                 <Routes>
                   {/* Loja pública */}

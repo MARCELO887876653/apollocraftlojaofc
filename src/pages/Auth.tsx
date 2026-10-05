@@ -14,8 +14,10 @@ import {
   InputOTPSlot,
 } from "@/components/ui/input-otp";
 
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
-import logo from "@/assets/logo.svg";
+import logoMark from "@/assets/logo.svg";
 import {
   ArrowLeft,
   ArrowRight,
@@ -46,8 +48,14 @@ function resolveRedirectAfterAuth(
   return fallback;
 }
 
+type StoreBrand = { name?: string; logoUrl?: string };
+
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
+  // Logo enviado pela loja (Configurações → Loja). Enquanto ele não chega,
+  // mostramos a marca Apollo embutida no projeto.
+  const store = useQuery(api.settings.getStore) as StoreBrand | undefined;
+  const storeName = store?.name ?? "Apollo Craft";
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = resolveRedirectAfterAuth(
@@ -178,18 +186,36 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             <>
               <CardHeader className="gap-3 text-center">
                 <div className="flex justify-center">
-                  <img
-                    src={logo}
-                    alt="Apollo Craft"
-                    width={64}
-                    height={64}
-                    className="mt-2 cursor-pointer rounded-xl transition-transform hover:scale-105"
+                  <button
+                    type="button"
                     onClick={() => navigate("/")}
-                  />
+                    title="Ir para a loja"
+                    className="group mt-2 rounded-2xl outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary/60"
+                  >
+                    {store?.logoUrl ? (
+                      <img
+                        src={store.logoUrl}
+                        alt={storeName}
+                        width={80}
+                        height={80}
+                        className="h-20 w-20 rounded-2xl object-cover shadow-lg shadow-primary/20 ring-1 ring-primary/25"
+                      />
+                    ) : (
+                      <span className="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/25">
+                        <img
+                          src={logoMark}
+                          alt={storeName}
+                          width={52}
+                          height={52}
+                          className="h-12 w-12"
+                        />
+                      </span>
+                    )}
+                  </button>
                 </div>
                 <div className="space-y-1">
                   <CardTitle className="text-2xl font-bold tracking-tight">
-                    Acessar a Apollo Craft
+                    Acessar a {storeName}
                   </CardTitle>
                   <CardDescription className="text-pretty">
                     Informe seu e-mail para receber um código de acesso. Sem senha,

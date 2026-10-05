@@ -30,7 +30,9 @@ const FIELD_LABELS: Record<string, string> = {
 
 export default function AdminSettings() {
   const store = useQuery(api.settings.getStoreConfig) as Store | undefined;
+  const subscribers = useQuery(api.maintenance.stats);
   const save = useMutation(api.settings.updateStore);
+  const removeSubscriber = useMutation(api.maintenance.remove);
   const [form, setForm] = useState<Store | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -218,6 +220,44 @@ export default function AdminSettings() {
           <div>
             <Label>Mensagem</Label>
             <Input value={form.maintenance.message} onChange={(e) => set("maintenance", { ...form.maintenance, message: e.target.value })} />
+          </div>
+          <div className="rounded-xl border border-border bg-muted/30 p-4">
+            <p className="text-sm font-bold">Avisos de retorno por e-mail</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {subscribers
+                ? `${subscribers.pending} e-mail(s) aguardando o aviso · ${subscribers.total} cadastrado(s) no total.`
+                : "Carregando..."}
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Ao desativar a manutenção, quem deixou o e-mail na loja recebe automaticamente o aviso de que ela voltou.
+            </p>
+            {subscribers && subscribers.subscribers.length > 0 && (
+              <div className="mt-3 max-h-32 space-y-1 overflow-y-auto text-xs text-muted-foreground">
+                {subscribers.subscribers.map((s) => (
+                  <div key={s.email} className="flex items-center justify-between gap-2">
+                    <span className="truncate">{s.email}</span>
+                    <span className={s.notifiedAt ? "text-emerald-500" : "text-amber-400"}>
+                      {s.notifiedAt ? "avisado" : "aguardando"}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remover ${s.email}`}
+                      className="shrink-0 text-muted-foreground transition-colors hover:text-red-400"
+                      onClick={async () => {
+                        try {
+                          await removeSubscriber({ email: s.email });
+                          toast.success("E-mail removido da lista.");
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : "Não foi possível remover");
+                        }
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

@@ -38,6 +38,8 @@ import type * as lib_defaultPages from "../lib/defaultPages.js";
 import type * as lib_deliveryRecipe from "../lib/deliveryRecipe.js";
 import type * as lib_hash from "../lib/hash.js";
 import type * as logs from "../logs.js";
+import type * as maintenance from "../maintenance.js";
+import type * as maintenanceEmails from "../maintenanceEmails.js";
 import type * as orders from "../orders.js";
 import type * as payments from "../payments.js";
 import type * as paymentsData from "../paymentsData.js";
@@ -88,6 +90,8 @@ declare const fullApi: ApiFromModules<{
   "lib/deliveryRecipe": typeof lib_deliveryRecipe;
   "lib/hash": typeof lib_hash;
   logs: typeof logs;
+  maintenance: typeof maintenance;
+  maintenanceEmails: typeof maintenanceEmails;
   orders: typeof orders;
   payments: typeof payments;
   paymentsData: typeof paymentsData;

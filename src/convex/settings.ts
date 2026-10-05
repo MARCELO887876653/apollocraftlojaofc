@@ -211,6 +211,20 @@ export const updateStore = mutation({
       if (val !== undefined) (next as any)[k] = val;
     }
     await setSetting(ctx, "store", next);
+
+    // Modo manutenção: ao LIGAR, devolve todos à fila de avisos; ao DESLIGAR,
+    // avisa por e-mail quem deixou o endereço na tela de manutenção.
+    const wasOn = Boolean(store?.maintenance?.enabled);
+    const isOn = Boolean(next?.maintenance?.enabled);
+    if (isOn && !wasOn) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.resetNotified, {});
+    } else if (!isOn && wasOn) {
+      await ctx.scheduler.runAfter(0, internal.maintenanceEmails.notifyAll, {
+        storeName: next?.name ?? DEFAULT_STORE.name,
+        storeUrl: next?.seo?.canonical || "https://apollocraft.online",
+      });
+    }
+
     await logAudit(ctx, admin, "settings.update", "settings", "store", patch);
   },
 });

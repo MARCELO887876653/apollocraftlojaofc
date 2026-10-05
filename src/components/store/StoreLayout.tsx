@@ -4,8 +4,9 @@ import { Link, useLocation } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { useCart } from "@/lib/cart";
 import { cn } from "@/lib/utils";
+import { MaintenanceGate } from "@/components/store/MaintenanceGate";
 import {
-  ShoppingBag, ShoppingCart, Menu, X, MessageCircle, User, Check, Search,
+  ShoppingBag, ShoppingCart, Menu, X, MessageCircle, User, Check, Search, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -16,6 +17,7 @@ type Store = {
   discord?: string;
   whatsapp?: string;
   instagram?: string;
+  maintenance?: { enabled: boolean; title: string; message: string; eta?: string };
 };
 
 type MenuItem = { label: string; url: string; newTab?: boolean };
@@ -23,6 +25,9 @@ type MenuItem = { label: string; url: string; newTab?: boolean };
 export function StoreLayout({ children }: { children: React.ReactNode }) {
   const store = useQuery(api.settings.getStore) as Store | undefined;
   const menu = useQuery(api.settings.getMenu) as MenuItem[] | undefined;
+  // A equipe (admin ativo) continua navegando durante a manutenção para poder
+  // desligá-la pelo painel; clientes veem a tela de manutenção.
+  const team = useQuery(api.team.me);
   const cart = useCart();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -39,6 +44,21 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
 
   const navItems = (menu ?? []).filter(Boolean);
   const storeName = store?.name ?? "Apollo Craft";
+
+  const isMaintenance = Boolean(store?.maintenance?.enabled);
+  const isStaff = Boolean(team?.admin?.active);
+  if (isMaintenance && !isStaff) {
+    // Enquanto a equipe ainda está sendo verificada, evita piscar a tela de
+    // manutenção para quem pode desligá-la pelo painel.
+    if (team === undefined) {
+      return (
+        <main className="flex min-h-screen items-center justify-center bg-background">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </main>
+      );
+    }
+    return <MaintenanceGate store={store} />;
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">

@@ -413,6 +413,14 @@ const schema = defineSchema(
       windowStart: v.number(),
       count: v.number(),
     }).index("by_key", ["key"]),
+
+    // ─── Avisos de retorno da loja (modo manutenção) ───
+    // Guarda quem pediu para ser avisado por e-mail quando a loja voltar.
+    maintenanceSubscribers: defineTable({
+      email: v.string(),
+      createdAt: v.number(),
+      notifiedAt: v.optional(v.number()),
+    }).index("by_email", ["email"]),
   },
   {
     schemaValidation: false,

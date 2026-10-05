@@ -1,5 +1,5 @@
 import { query, mutation, internalMutation } from "./_generated/server";
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { internal } from "./_generated/api";
 import { requireAdmin, logAudit } from "./lib/admin";
@@ -32,12 +32,19 @@ export const create = mutation({
   handler: async (ctx, { items, couponCode, customer }) => {
     const store = (await getSetting(ctx, "store")) as any;
 
+    // Modo manutenção: loja fechada para compras (nunca aceita pedido novo).
+    if (store?.maintenance?.enabled) {
+      throw new ConvexError(
+        "A loja está em manutenção e não está aceitando pedidos agora. Voltamos em breve!",
+      );
+    }
+
     // rate limit por pedido de checkout
     const rlKey = `checkout:${customer.email ?? "anon"}`;
     const allowed = await checkRateLimit(ctx, rlKey, 15, 60 * 60 * 1000);
-    if (!allowed) throw new Error("Muitas tentativas. Tente novamente em alguns minutos.");
+    if (!allowed) throw new ConvexError("Muitas tentativas. Tente novamente em alguns minutos.");
 
-    if (!items.length) throw new Error("Carrinho vazio");
+    if (!items.length) throw new ConvexError("Carrinho vazio");
 
     // valida campos de checkout conforme configuração do painel.
     // Campos desativados NÃO são rejeitados: apenas são ignorados (o frontend
@@ -52,7 +59,7 @@ export const create = mutation({
       const value = (customer as any)[f.key];
       if (f.required && f.key === "email" && !value) continue; // validado abaixo (com fallback da conta)
       if (f.required && (!value || String(value).trim() === ""))
-        throw new Error(`${label[f.key] ?? f.label} é obrigatório`);
+        throw new ConvexError(`${label[f.key] ?? f.label} é obrigatório`);
     }
     if (!customer.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email)) {
       // fallback: usa o e-mail da conta logada (evita erro quando o visitante
@@ -63,7 +70,7 @@ export const create = mutation({
       if (accountEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountEmail)) {
         customer.email = accountEmail;
       } else {
-        throw new Error("E-mail inválido");
+        throw new ConvexError("E-mail inválido");
       }
     }
 
@@ -76,28 +83,28 @@ export const create = mutation({
     const reserved: Array<{ kind: "product" | "variant"; id: any; qty: number; wasUnlimited: boolean; prevStock: number }> = [];
 
     for (const item of items) {
-      if (item.quantity < 1) throw new Error("Quantidade inválida");
+      if (item.quantity < 1) throw new ConvexError("Quantidade inválida");
       const product = await ctx.db.get(item.productId);
       if (!product || !product.active || product.hidden)
-        throw new Error("Produto indisponível");
+        throw new ConvexError("Produto indisponível");
       if (item.quantity < product.minQty)
-        throw new Error(`Quantidade mínima de "${product.name}" é ${product.minQty}`);
+        throw new ConvexError(`Quantidade mínima de "${product.name}" é ${product.minQty}`);
       if (item.quantity > product.maxQty)
-        throw new Error(`Quantidade máxima de "${product.name}" é ${product.maxQty}`);
+        throw new ConvexError(`Quantidade máxima de "${product.name}" é ${product.maxQty}`);
 
       let unitPrice = product.priceCents;
       let variantDoc = null;
       if (item.variantId) {
         variantDoc = await ctx.db.get(item.variantId);
         if (!variantDoc || variantDoc.productId !== product._id || !variantDoc.active)
-          throw new Error("Variante indisponível");
+          throw new ConvexError("Variante indisponível");
         unitPrice = variantDoc.priceCents;
       }
 
       // estoque
       const stockHolder = variantDoc ?? product;
       if (!stockHolder.unlimitedStock && stockHolder.stock < item.quantity)
-        throw new Error(`Estoque insuficiente de "${product.name}"`);
+        throw new ConvexError(`Estoque insuficiente de "${product.name}"`);
 
       subtotal += unitPrice * item.quantity;
       orderItems.push({
@@ -124,7 +131,7 @@ export const create = mutation({
       if (r.wasUnlimited) continue;
       const doc: any = await ctx.db.get(r.id);
       if (!doc || doc.unlimitedStock) continue;
-      if (doc.stock < r.qty) throw new Error(`Estoque insuficiente de "${doc.name}"`);
+      if (doc.stock < r.qty) throw new ConvexError(`Estoque insuficiente de "${doc.name}"`);
       await ctx.db.patch(r.id, { stock: doc.stock - r.qty });
     }
 
@@ -137,18 +144,18 @@ export const create = mutation({
         .query("coupons")
         .withIndex("by_code", (q) => q.eq("code", normalized))
         .first();
-      if (!coupon || !coupon.active) throw new Error("Cupom inválido");
+      if (!coupon || !coupon.active) throw new ConvexError("Cupom inválido");
       const now = Date.now();
-      if (coupon.startsAt && now < coupon.startsAt) throw new Error("Cupom ainda não começou");
-      if (coupon.endsAt && now > coupon.endsAt) throw new Error("Cupom expirado");
-      if (coupon.maxUses && coupon.usesCount >= coupon.maxUses) throw new Error("Cupom esgotado");
+      if (coupon.startsAt && now < coupon.startsAt) throw new ConvexError("Cupom ainda não começou");
+      if (coupon.endsAt && now > coupon.endsAt) throw new ConvexError("Cupom expirado");
+      if (coupon.maxUses && coupon.usesCount >= coupon.maxUses) throw new ConvexError("Cupom esgotado");
       if (coupon.maxUsesPerCustomer) {
         const usages = await ctx.db
           .query("couponUsages")
           .withIndex("by_coupon_email", (q) => q.eq("couponId", coupon._id).eq("email", customer.email!))
           .collect();
         if (usages.length >= coupon.maxUsesPerCustomer)
-          throw new Error("Você já usou este cupom o máximo de vezes");
+          throw new ConvexError("Você já usou este cupom o máximo de vezes");
       }
       // subtotal elegível com restrições
       let eligible = 0;
@@ -161,9 +168,9 @@ export const create = mutation({
         }
         eligible += item.totalCents;
       }
-      if (eligible === 0) throw new Error("Cupom não aplicável aos itens do carrinho");
+      if (eligible === 0) throw new ConvexError("Cupom não aplicável aos itens do carrinho");
       if (coupon.minSubtotalCents && eligible < coupon.minSubtotalCents)
-        throw new Error(`Cupom exige pedido mínimo de ${(coupon.minSubtotalCents / 100).toFixed(2)}`);
+        throw new ConvexError(`Cupom exige pedido mínimo de ${(coupon.minSubtotalCents / 100).toFixed(2)}`);
       discount = coupon.type === "percent"
         ? Math.floor((eligible * coupon.value) / 100)
         : Math.min(coupon.value, eligible);
@@ -497,7 +504,7 @@ export const adminUpdateStatus = mutation({
   handler: async (ctx, { id, paymentStatus, note }) => {
     const admin = await requireAdmin(ctx, "orders.manage");
     const order = await ctx.db.get(id);
-    if (!order) throw new Error("Pedido não encontrado");
+    if (!order) throw new ConvexError("Pedido não encontrado");
     const now = Date.now();
 
     // Transição para "paid": idempotente, dispara entrega e webhooks como no gateway
@@ -563,8 +570,8 @@ export const adminCancel = mutation({
   handler: async (ctx, { id }) => {
     const admin = await requireAdmin(ctx, "orders.manage");
     const order = await ctx.db.get(id);
-    if (!order) throw new Error("Pedido não encontrado");
-    if (order.paymentStatus === "paid") throw new Error("Pedido pago: use reembolso no gateway");
+    if (!order) throw new ConvexError("Pedido não encontrado");
+    if (order.paymentStatus === "paid") throw new ConvexError("Pedido pago: use reembolso no gateway");
     const now = Date.now();
     // devolve estoque
     for (const item of order.items) {

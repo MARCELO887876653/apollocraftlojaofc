@@ -43,7 +43,12 @@ function renderOtpEmail({ appName, code, expiresMinutes }: OtpEmailArgs) {
             <td style="height:4px;background:linear-gradient(90deg,#0ea5e9,#38bdf8,#0ea5e9);"></td>
           </tr>
           <tr>
-            <td style="padding:36px 32px 8px 32px;text-align:center;">
+            <td style="padding:26px 32px 0 32px;text-align:center;">
+              <span style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:800;letter-spacing:3px;color:#7dd3fc;text-transform:uppercase;">${appName}</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 32px 8px 32px;text-align:center;">
               <div style="display:inline-block;padding:10px 14px;border-radius:14px;background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.35);color:#38bdf8;font-size:22px;">&#9993;</div>
               <h1 style="margin:22px 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:1.3;color:#eaf2fb;font-weight:800;">
                 Seu código de acesso
@@ -94,6 +99,22 @@ function renderOtpEmail({ appName, code, expiresMinutes }: OtpEmailArgs) {
 </html>`;
 }
 
+/** Versão em texto puro do e-mail — melhora a entrega e a leitura. */
+function renderOtpText(code: string, expiresMinutes: number) {
+  return [
+    `Seu código de acesso à ${APP_NAME}`,
+    "",
+    `Código: ${code}`,
+    "",
+    `Digite este código na tela de verificação que está aberta no seu navegador.`,
+    `Ele expira em ${expiresMinutes} minutos.`,
+    "",
+    "Se você não solicitou este código, pode ignorar este e-mail com segurança.",
+    "",
+    `${APP_NAME} - ${SUPPORT_EMAIL}`,
+  ].join("\n");
+}
+
 /** Envia o código pela API da Resend (REST simples, sem SDK). */
 async function sendWithResend(to: string, code: string) {
   const apiKey = process.env.RESEND_API_KEY;
@@ -117,6 +138,7 @@ async function sendWithResend(to: string, code: string) {
         code,
         expiresMinutes: EXPIRES_MINUTES,
       }),
+      text: renderOtpText(code, EXPIRES_MINUTES),
     }),
   });
 

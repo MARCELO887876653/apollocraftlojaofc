@@ -13,17 +13,30 @@ export const listAudit = query({
   },
   handler: async (ctx, { search, limit }) => {
     await requireAdmin(ctx, "logs.view");
-    const all = await ctx.db.query("auditLogs").collect();
-    let list = all.sort((a, b) => b.createdAt - a.createdAt);
-    if (search) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (l) =>
-          l.action.toLowerCase().includes(s) ||
-          l.userName.toLowerCase().includes(s) ||
-          l.entity?.toLowerCase().includes(s),
-      );
+    const max = limit ?? 200;
+    // Índice por data (mais recente → mais antigo): não precisa carregar a
+    // tabela inteira de auditoria, que só cresce.
+    const recent = ctx.db
+      .query("auditLogs")
+      .withIndex("by_createdAt")
+      .order("desc");
+    if (!search) {
+      return await recent.take(max);
     }
-    return list.slice(0, limit ?? 200);
+    // Com busca, percorre do mais recente para o mais antigo e para assim que
+    // junta os resultados pedidos.
+    const s = search.toLowerCase();
+    const found = [];
+    for await (const l of recent) {
+      if (
+        l.action.toLowerCase().includes(s) ||
+        l.userName.toLowerCase().includes(s) ||
+        l.entity?.toLowerCase().includes(s)
+      ) {
+        found.push(l);
+        if (found.length >= max) break;
+      }
+    }
+    return found;
   },
 });

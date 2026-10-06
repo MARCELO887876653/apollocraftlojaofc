@@ -278,7 +278,13 @@ export default function CheckoutPage() {
                 <div className="flex items-center gap-3">
                   <div className="size-12 shrink-0 overflow-hidden rounded-xl bg-muted">
                     {item.image ? (
-                      <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        loading="lazy"
+                        decoding="async"
+                        className="h-full w-full object-cover"
+                      />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-muted-foreground">
                         <ShoppingBag className="size-5" />

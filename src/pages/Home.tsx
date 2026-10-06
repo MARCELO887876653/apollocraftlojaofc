@@ -86,7 +86,12 @@ function Hero() {
           className="absolute inset-0"
           aria-hidden
         >
-          <img src={hero.imageDesktop} alt="" className="h-full w-full object-cover" />
+          <img
+            src={hero.imageDesktop}
+            alt=""
+            decoding="async"
+            className="h-full w-full object-cover"
+          />
           <div className="absolute inset-0 bg-gradient-to-r from-background via-background/85 to-background/40" />
         </motion.div>
       )}
@@ -95,6 +100,10 @@ function Hero() {
           <motion.div
             animate={{ opacity: [0.75, 1, 0.75], scale: [1, 1.06, 1] }}
             transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
+            // Promove o brilho desfocado para a própria camada de composição:
+            // sem isso o navegador re-renderiza o blur gigante a cada quadro da
+            // animação infinita, o que trava o scroll em celulares.
+            style={{ willChange: "transform, opacity" }}
             className="absolute -top-48 left-1/3 h-[420px] w-[720px] rounded-full bg-primary/20 blur-[130px]"
           />
         </div>

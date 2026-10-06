@@ -43,8 +43,14 @@ export const adminGet = query({
 export const topBuyers = query({
   args: {},
   handler: async (ctx) => {
-    const all = await ctx.db.query("customers").collect();
-    return all
+    // Índice por total gasto (maior → menor): não precisa varrer todos os
+    // clientes para montar um Top 3.
+    const top = await ctx.db
+      .query("customers")
+      .withIndex("by_spent")
+      .order("desc")
+      .take(25);
+    return top
       .filter((c) => c.ordersCount > 0 && c.totalSpentCents > 0)
       .sort((a, b) => b.totalSpentCents - a.totalSpentCents)
       .slice(0, 3)

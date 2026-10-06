@@ -54,6 +54,34 @@ const AdminPromotions = lazy(() => import("./pages/admin/Promotions.tsx"));
 
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
+/**
+ * Pré-carrega, quando o navegador fica ocioso, os chunks da navegação mais
+ * comum da loja. Assim a troca de página não suspende o <Suspense> inteiro
+ * (o que remonta o header e pisca "Loading...") — a troca fica instantânea.
+ * São exatamente os mesmos caminhos usados no lazy() acima, então o Vite
+ * reaproveita o mesmo chunk.
+ */
+const STORE_ROUTE_LOADERS = [
+  () => import("./pages/Categories.tsx"),
+  () => import("./pages/CategoryPage.tsx"),
+  () => import("./pages/Product.tsx"),
+  () => import("./pages/Cart.tsx"),
+  () => import("./pages/Checkout.tsx"),
+  () => import("./pages/Auth.tsx"),
+];
+
+function prefetchStoreRoutes() {
+  for (const load of STORE_ROUTE_LOADERS) load().catch(() => {});
+}
+
+if (typeof window !== "undefined") {
+  const requestIdle = (window as unknown as {
+    requestIdleCallback?: (cb: () => void) => number;
+  }).requestIdleCallback;
+  if (requestIdle) requestIdle(prefetchStoreRoutes);
+  else window.setTimeout(prefetchStoreRoutes, 1500);
+}
+
 // Simple loading fallback for route transitions
 function RouteLoading() {
   return (

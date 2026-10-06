@@ -548,8 +548,12 @@ export const adminListLogs = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx, "logs.view");
-    const logs = await ctx.db.query("apiLogs").collect();
-    return logs.sort((a, b) => b.createdAt - a.createdAt).slice(0, 200);
+    // Índice por data: pega os 200 mais recentes sem carregar a tabela inteira.
+    return await ctx.db
+      .query("apiLogs")
+      .withIndex("by_createdAt")
+      .order("desc")
+      .take(200);
   },
 });
 

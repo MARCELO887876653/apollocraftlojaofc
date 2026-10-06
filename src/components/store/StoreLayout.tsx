@@ -27,7 +27,12 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
   const menu = useQuery(api.settings.getMenu) as MenuItem[] | undefined;
   // A equipe (admin ativo) continua navegando durante a manutenção para poder
   // desligá-la pelo painel; clientes veem a tela de manutenção.
-  const team = useQuery(api.team.me);
+  // A consulta à equipe só é feita quando a loja está em manutenção: fora disso
+  // a resposta seria descartada e cada página abriria uma assinatura a mais.
+  const team = useQuery(
+    api.team.me,
+    store?.maintenance?.enabled ? {} : "skip",
+  );
   const cart = useCart();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);

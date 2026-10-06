@@ -476,7 +476,21 @@ export const adminList = query({
           o.gatewayPaymentId?.toLowerCase().includes(s),
       );
     }
-    return list.sort((a, b) => b.createdAt - a.createdAt);
+    // A lista devolve só o que a tabela do painel usa. Sem isso cada pedido
+    // trafega o documento inteiro — incluindo o QR Code PIX em base64 — e a
+    // página de pedidos fica pesada conforme a loja cresce.
+    return list
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((o) => ({
+        _id: o._id,
+        number: o.number,
+        customerName: o.customerName,
+        customerEmail: o.customerEmail,
+        totalCents: o.totalCents,
+        paymentStatus: o.paymentStatus,
+        deliveryStatus: o.deliveryStatus,
+        createdAt: o.createdAt,
+      }));
   },
 });
 

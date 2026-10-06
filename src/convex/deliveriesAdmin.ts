@@ -13,7 +13,24 @@ export const adminList = query({
     await requireAdmin(ctx, "deliveries.view");
     let list = await ctx.db.query("deliveries").collect();
     if (status) list = list.filter((d) => d.status === status);
-    return list.sort((a, b) => b.createdAt - a.createdAt);
+    // A tabela do painel não usa o payload da entrega (códigos/mensagens);
+    // removê-lo evita trafegar documentos grandes linha a linha.
+    return list
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((d) => ({
+        _id: d._id,
+        orderNumber: d.orderNumber,
+        productName: d.productName,
+        type: d.type,
+        target: d.target,
+        quantity: d.quantity,
+        status: d.status,
+        attempts: d.attempts,
+        maxAttempts: d.maxAttempts,
+        lastError: d.lastError,
+        createdAt: d.createdAt,
+        deliveredAt: d.deliveredAt,
+      }));
   },
 });
 

@@ -8,6 +8,22 @@ import { assertDeliveryV1Valid } from "./lib/deliveryRecipe";
 
 // ─── Público ───
 
+/**
+ * Anexa o nome da categoria a cada produto. Faz isso no servidor uma única vez
+ * por consulta, evitando que cada card da vitrine abra a própria assinatura de
+ * categorias no cliente (a home chega a renderizar dezenas de cards).
+ */
+async function withCategoryNames(ctx: any, products: any[]) {
+  const ids = new Set(products.map((p) => p.categoryId).filter(Boolean));
+  if (ids.size === 0) return products;
+  const categories = await ctx.db.query("categories").collect();
+  const byId = new Map<any, string>(categories.map((c: any) => [c._id, c.name]));
+  return products.map((p) => ({
+    ...p,
+    categoryName: p.categoryId ? byId.get(p.categoryId) : undefined,
+  }));
+}
+
 export const listActive = query({
   args: {
     categoryId: v.optional(v.id("categories")),
@@ -32,9 +48,17 @@ export const listActive = query({
         }
         frontier = next;
       }
-      products = (await ctx.db.query("products").collect()).filter((p) =>
-        include.has(p.categoryId),
+      // Consulta apenas os produtos das categorias envolvidas (índice
+      // by_category) em vez de varrer a tabela inteira de produtos.
+      const perCategory = await Promise.all(
+        [...include].map((id) =>
+          ctx.db
+            .query("products")
+            .withIndex("by_category", (q) => q.eq("categoryId", id))
+            .collect(),
+        ),
       );
+      products = perCategory.flat();
     } else {
       products = await ctx.db.query("products").collect();
     }
@@ -72,10 +96,13 @@ export const listFeatured = query({
       .query("products")
       .withIndex("by_active_order", (q) => q.eq("active", true))
       .collect();
-    return all
-      .filter((p) => !p.hidden && p.featured)
-      .sort((a, b) => a.order - b.order)
-      .slice(0, limit ?? 8);
+    return withCategoryNames(
+      ctx,
+      all
+        .filter((p) => !p.hidden && p.featured)
+        .sort((a, b) => a.order - b.order)
+        .slice(0, limit ?? 8),
+    );
   },
 });
 
@@ -86,10 +113,13 @@ export const listPopular = query({
       .query("products")
       .withIndex("by_active_order", (q) => q.eq("active", true))
       .collect();
-    return all
-      .filter((p) => !p.hidden && p.popular)
-      .sort((a, b) => b.salesCount - a.salesCount)
-      .slice(0, limit ?? 8);
+    return withCategoryNames(
+      ctx,
+      all
+        .filter((p) => !p.hidden && p.popular)
+        .sort((a, b) => b.salesCount - a.salesCount)
+        .slice(0, limit ?? 8),
+    );
   },
 });
 
@@ -100,15 +130,18 @@ export const listPromo = query({
       .query("products")
       .withIndex("by_active_order", (q) => q.eq("active", true))
       .collect();
-    return all
-      .filter(
-        (p) =>
-          !p.hidden &&
-          p.compareAtPriceCents !== undefined &&
-          p.compareAtPriceCents > p.priceCents,
-      )
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, limit ?? 8);
+    return withCategoryNames(
+      ctx,
+      all
+        .filter(
+          (p) =>
+            !p.hidden &&
+            p.compareAtPriceCents !== undefined &&
+            p.compareAtPriceCents > p.priceCents,
+        )
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, limit ?? 8),
+    );
   },
 });
 
@@ -119,10 +152,13 @@ export const listNewest = query({
       .query("products")
       .withIndex("by_active_order", (q) => q.eq("active", true))
       .collect();
-    return all
-      .filter((p) => !p.hidden)
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, limit ?? 8);
+    return withCategoryNames(
+      ctx,
+      all
+        .filter((p) => !p.hidden)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, limit ?? 8),
+    );
   },
 });
 
@@ -161,9 +197,10 @@ export const listRelated = query({
     } else {
       list = await ctx.db.query("products").collect();
     }
-    return list
-      .filter((p) => p.active && !p.hidden && p._id !== productId)
-      .slice(0, limit ?? 4);
+    return withCategoryNames(
+      ctx,
+      list.filter((p) => p.active && !p.hidden && p._id !== productId).slice(0, limit ?? 4),
+    );
   },
 });
 

@@ -1,8 +1,6 @@
 import { motion } from "framer-motion";
 import { formatBRL } from "@/lib/format";
-import { useQuery } from "convex/react";
 import { Link } from "react-router";
-import { api } from "@/convex/_generated/api";
 import { ShoppingBag, ShoppingCart, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -19,11 +17,12 @@ type Product = {
   minQty: number;
   maxQty: number;
   categoryId?: string;
+  /** Já vem resolvido pelas consultas de vitrine (products.list*) — antes cada
+   *  card abria a sua própria assinatura de categorias no cliente. */
+  categoryName?: string;
 };
 
 export function ProductCard({ product, index = 0 }: { product: Product; index?: number }) {
-  const categories = useQuery(api.categories.listPublic) as any[] | undefined;
-  const category = categories?.find((c) => c._id === product.categoryId);
   const outOfStock = !product.unlimitedStock && product.stock <= 0;
   const discount =
     product.compareAtPriceCents && product.compareAtPriceCents > product.priceCents
@@ -73,9 +72,9 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
         </Link>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          {category && (
+          {product.categoryName && (
             <span className="text-[10px] font-bold uppercase tracking-wider text-sky-500/90">
-              {category.name}
+              {product.categoryName}
             </span>
           )}
           <Link

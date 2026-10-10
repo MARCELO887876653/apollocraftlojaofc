@@ -21,7 +21,12 @@ export const me = query({
     const userId = await getAuthUserId(ctx);
     if (userId === null) return null;
     const user = await ctx.db.get(userId);
-    if (!user?.email) return null;
+    if (!user) return null;
+    // Conta de visitante (login anônimo) não tem e-mail. Ela continua sendo
+    // devolvida com `admin: null` para o painel mostrar "acesso restrito" com a
+    // opção de entrar com e-mail — devolver `null` aqui era indistinguível de
+    // "sem sessão" e deixava o painel girando para sempre.
+    if (!user.email) return { user, admin: null };
     const admin = await ctx.db
       .query("adminUsers")
       .withIndex("by_email", (q) => q.eq("email", user.email!))

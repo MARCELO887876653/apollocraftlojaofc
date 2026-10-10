@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "convex/react";
+import { useAuthActions } from "@convex-dev/auth/react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Button } from "@/components/ui/button";
@@ -51,15 +52,31 @@ const TABS = [
   { to: "/painel/mais", label: "Mais", icon: MoreHorizontal, perm: "*" },
 ];
 
+type TeamUser = { email?: string; name?: string; isAnonymous?: boolean } | null;
+
 function AdminShell() {
   const me = useQuery(api.team.me) as
-    | { user: any; admin: { name: string; email: string; role: string; permissions: string[] } | null }
+    | { user: TeamUser; admin: { name: string; email: string; role: string; permissions: string[] } | null }
     | null
     | undefined;
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [stuck, setStuck] = useState(false);
 
-  if (me === undefined || me === null) {
+  // Uma consulta que nunca responde (conexão/autenticação travada) não pode
+  // deixar o painel girando para sempre: depois de alguns segundos mostramos
+  // um estado com ação em vez do spinner infinito.
+  useEffect(() => {
+    if (me !== undefined) {
+      setStuck(false);
+      return;
+    }
+    const timer = setTimeout(() => setStuck(true), 12000);
+    return () => clearTimeout(timer);
+  }, [me]);
+
+  if (me === undefined) {
+    if (stuck) return <SessionUnknown retry />;
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -67,8 +84,13 @@ function AdminShell() {
     );
   }
 
+  // `null` = o servidor não reconheceu a sessão (token expirado/revogado ou
+  // conta que não existe mais). Antes isso caía no mesmo spinner do "carregando"
+  // e o painel ficava carregando para sempre.
+  if (me === null) return <SessionUnknown />;
+
   if (!me.admin) {
-    return <NoAccess email={me.user?.email} />;
+    return <NoAccess user={me.user} />;
   }
 
   const perms = me.admin.role === "owner" ? ["*"] : me.admin.permissions;
@@ -241,11 +263,78 @@ export default function AdminLayout() {
   );
 }
 
-/** Tela de acesso negado — com bootstrap do primeiro owner quando nenhum admin existe. */
-function NoAccess({ email }: { email?: string }) {
+/**
+ * Sessão que o servidor não reconhece. Oferece entrar novamente limpando a
+ * sessão local — sem isso a única saída era apagar os dados do site no
+ * navegador.
+ */
+function SessionUnknown({ retry }: { retry?: boolean }) {
   const navigate = useNavigate();
+  const { signOut } = useAuthActions();
+  const [busy, setBusy] = useState(false);
+
+  const signInAgain = async () => {
+    setBusy(true);
+    try {
+      await signOut();
+    } catch {
+      // Mesmo que a limpeza da sessão falhe, seguimos para a tela de login.
+    }
+    navigate("/auth?returnTo=%2Fpainel");
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center p-6">
+      <div className="max-w-md text-center">
+        <ShieldCheck className="mx-auto size-12 text-muted-foreground" />
+        <h1 className="mt-4 text-xl font-bold">Sessão não reconhecida</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {retry
+            ? "O painel não conseguiu falar com o servidor. Confira sua conexão e tente novamente."
+            : "Sua sessão de acesso ao painel expirou ou não é mais válida. Entre novamente para continuar."}
+        </p>
+        <div className="mt-6 flex flex-col items-center gap-2">
+          <Button onClick={() => void signInAgain()} disabled={busy}>
+            {busy ? (
+              <Loader2 className="mr-2 size-4 animate-spin" />
+            ) : (
+              <ShieldCheck className="mr-2 size-4" />
+            )}
+            Entrar novamente
+          </Button>
+          {retry && (
+            <Button variant="ghost" onClick={() => window.location.reload()}>
+              Recarregar página
+            </Button>
+          )}
+          <Button variant="ghost" onClick={() => navigate("/")}>
+            <Store className="mr-2 size-4" /> Ir para a loja
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Tela de acesso negado — com bootstrap do primeiro owner quando nenhum admin existe. */
+function NoAccess({ user }: { user?: TeamUser }) {
+  const navigate = useNavigate();
+  const { signOut } = useAuthActions();
   const [claiming, setClaiming] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const claimOwnership = useMutation(api.team.claimOwnership);
+  const isGuest = user?.isAnonymous === true;
+  const email = user?.email;
+
+  const enterWithEmail = async () => {
+    setSwitching(true);
+    try {
+      await signOut();
+    } catch {
+      // Mesmo que a limpeza da sessão falhe, seguimos para a tela de login.
+    }
+    navigate("/auth?returnTo=%2Fpainel");
+  };
 
   const claim = async () => {
     setClaiming(true);
@@ -267,6 +356,35 @@ function NoAccess({ email }: { email?: string }) {
     }
   };
 
+  if (isGuest) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="max-w-md text-center">
+          <ShieldCheck className="mx-auto size-12 text-muted-foreground" />
+          <h1 className="mt-4 text-xl font-bold">Painel administrativo</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Você está em uma <strong className="text-foreground">conta de visitante</strong> — ela
+            não tem e-mail e por isso não pode fazer parte da equipe administrativa. Entre com o
+            e-mail do administrador para acessar o painel.
+          </p>
+          <div className="mt-6 flex flex-col items-center gap-2">
+            <Button onClick={() => void enterWithEmail()} disabled={switching}>
+              {switching ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="mr-2 size-4" />
+              )}
+              Entrar com e-mail
+            </Button>
+            <Button variant="ghost" onClick={() => navigate("/")}>
+              <Store className="mr-2 size-4" /> Ir para a loja
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
       <div className="max-w-md text-center">
@@ -279,6 +397,10 @@ function NoAccess({ email }: { email?: string }) {
           <Button onClick={claim} disabled={claiming}>
             <ShieldCheck className="mr-2 size-4" />
             {claiming ? "Verificando..." : "Sou o dono da loja — reivindicar acesso"}
+          </Button>
+          <Button variant="outline" onClick={() => void enterWithEmail()} disabled={switching}>
+            {switching && <Loader2 className="mr-2 size-4 animate-spin" />}
+            Entrar com outro e-mail
           </Button>
           <Button variant="ghost" onClick={() => navigate("/")}>
             <Store className="mr-2 size-4" /> Ir para a loja

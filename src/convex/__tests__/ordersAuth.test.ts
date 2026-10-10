@@ -146,6 +146,55 @@ describe("autorização de entregas (orders.guestDeliveries)", () => {
   });
 });
 
+describe("acesso ao painel (team.me)", () => {
+  test("sem sessão → null (o app manda para o login)", async () => {
+    const t = convexTest(schema, modules);
+    expect(await t.query(api.team.me)).toBeNull();
+  });
+
+  test("convidado anônimo (sem e-mail) → responde com admin null, nunca null", async () => {
+    const t = convexTest(schema, modules);
+    const { guest } = await seed(t);
+    const me = await t.withIdentity(identity(guest)).query(api.team.me);
+    // `null` aqui era indistinguível de "carregando" e deixava o painel
+    // girando para sempre; a tela de acesso restrito precisa desta resposta.
+    expect(me).not.toBeNull();
+    expect(me!.admin).toBeNull();
+    expect(me!.user?._id).toBe(guest);
+  });
+
+  test("usuário sem e-mail → responde com admin null", async () => {
+    const t = convexTest(schema, modules);
+    const noEmail = await t.run(async (ctx) => ctx.db.insert("users", { name: "SemEmail" }));
+    const me = await t.withIdentity(identity(noEmail)).query(api.team.me);
+    expect(me!.admin).toBeNull();
+  });
+
+  test("owner cadastrado pelo e-mail → admin devolvido", async () => {
+    const t = convexTest(schema, modules);
+    const { userA } = await seed(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("adminUsers", {
+        email: "alice@example.com",
+        name: "Alice",
+        role: "owner",
+        permissions: ["orders.view"],
+        active: true,
+        createdAt: Date.now(),
+      });
+    });
+    const me = await t.withIdentity(identity(userA)).query(api.team.me);
+    expect(me?.admin?.role).toBe("owner");
+  });
+
+  test("cliente comum → admin null (acesso restrito, não erro)", async () => {
+    const t = convexTest(schema, modules);
+    const { userB } = await seed(t);
+    const me = await t.withIdentity(identity(userB)).query(api.team.me);
+    expect(me!.admin).toBeNull();
+  });
+});
+
 describe("bootstrap de owner (team.claimOwnership)", () => {
   test("convidado anônimo (sem e-mail) não consegue virar owner", async () => {
     const t = convexTest(schema, modules);

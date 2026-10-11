@@ -41,3 +41,39 @@ export function convexUrlCandidates(raw?: string | null): string[] {
   if (!configured) return [STORE_DEPLOYMENT_URL];
   return configured === STORE_DEPLOYMENT_URL ? [configured] : [configured, STORE_DEPLOYMENT_URL];
 }
+
+/** Tempo máximo do teste abaixo — o normal é responder em menos de 100ms. */
+const PROBE_TIMEOUT_MS = 4000;
+
+/**
+ * Pergunta ao endereço, por HTTP (mesmo endpoint público que as ferramentas
+ * usam), se ele responde às funções desta loja. `settings:getStore` é público e
+ * sempre devolve um objeto no backend certo, então um "não" aqui é motivo
+ * suficiente para trocar de endereço na hora — sem esperar o WebSocket dar
+ * (ou não) sinal de vida.
+ */
+export async function deploymentServesStore(
+  url: string,
+  timeoutMs = PROBE_TIMEOUT_MS,
+): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${url}/api/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "settings:getStore", args: {}, format: "json" }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { status?: string } | null;
+    return body?.status === "success";
+  } catch {
+    // Endereço fora do ar, sem CORS, com timeout ou resposta inválida: não
+    // confirmamos a loja aqui — e o candidato seguinte é justamente o
+    // deployment dela.
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}

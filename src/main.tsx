@@ -24,7 +24,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import "./index.css";
 import { CartProvider } from "@/lib/cart";
 import { ThemeProvider } from "@/lib/theme";
-import { convexUrlCandidates } from "@/lib/convex-url";
+import { convexUrlCandidates, deploymentServesStore } from "@/lib/convex-url";
 
 // Preview/captura de tela do ambiente Freebuff: carregado SOMENTE em
 // desenvolvimento. Em produção este import dinâmico é eliminado pelo Vite
@@ -290,18 +290,37 @@ function ConnectionGuard({
   const client = useConvex();
   const { isWebSocketConnected } = useConvexConnectionState();
   const reachable = useStoreReachable(client);
+  // O cliente pode ficar pendurado sem nunca responder (foi o caso do endereço
+  // errado). Um POST público no mesmo endereço responde em milissegundos se ele
+  // não é o deployment desta loja, então dá para trocar sem esperar conexão.
+  const [probeFailed, setProbeFailed] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
   const fired = useRef(false);
 
   useEffect(() => {
+    if (!canFailover) return;
+    let alive = true;
+    void deploymentServesStore(url).then((serves) => {
+      if (alive && !serves) setProbeFailed(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [url, canFailover]);
+
+  useEffect(() => {
     if (reachable || fired.current) return;
+    // 0ms: o teste respondeu que este endereço não é a loja.
+    // 6s: o teste não acusou problema, mas nada chegou pelo cliente.
+    // 10s: não há para onde trocar — só avisamos depois de um tempo generoso.
+    const delay = probeFailed ? 0 : canFailover ? 6000 : 10000;
     const timer = setTimeout(() => {
       fired.current = true;
       if (canFailover) onFailover();
       else setTimedOut(true);
-    }, 10000);
+    }, delay);
     return () => clearTimeout(timer);
-  }, [reachable, canFailover, onFailover]);
+  }, [reachable, probeFailed, canFailover, onFailover]);
 
   if (reachable || !timedOut) return null;
 

@@ -134,7 +134,7 @@ export default function ApiDocs() {
               <code className="rounded bg-muted px-1">API_BASE_URL</code> é o endereço das HTTP actions
               do Convex (o backend de produção da loja):
             </p>
-            <Code title="ambiente (.env do addon)">{`API_BASE_URL=https://tidy-mandrill-432.convex.site/api/v1
+            <Code title="ambiente (.env do addon)">{`API_BASE_URL=https://capable-akita-865.convex.site/api/v1
 API_KEY=sk_live_SUA_CHAVE_AQUI
 SERVER_ID=survival-01
 ADDON_ID=economy`}</Code>
@@ -443,8 +443,8 @@ registerHandler("ADD_RANK", async (d) => { addRank(d.order.client_identifier, d.
   "module_permissions": {
     "@minecraft/server-net": {
       "allowed_uris": [
-        "https://tidy-mandrill-432.convex.site/api/v1/",
-        "https://tidy-mandrill-432.convex.site/api/v1"
+        "https://capable-akita-865.convex.site/api/v1/",
+        "https://capable-akita-865.convex.site/api/v1"
       ]
     }
   }
@@ -460,7 +460,7 @@ registerHandler("ADD_RANK", async (d) => { addRank(d.order.client_identifier, d.
   "allowed_modules": ["@minecraft/server", "@minecraft/server-admin", "@minecraft/server-net"],
   "module_permissions": {
     "@minecraft/server-net": {
-      "allowed_uris": ["https://tidy-mandrill-432.convex.site/api/v1"],
+      "allowed_uris": ["https://capable-akita-865.convex.site/api/v1"],
       "force_https": true,
       "max_body_bytes": 262144,
       "max_concurrent_requests": 2
@@ -470,7 +470,7 @@ registerHandler("ADD_RANK", async (d) => { addRank(d.order.client_identifier, d.
 
             <p className="font-semibold text-foreground">2) variables.json (não secreto)</p>
             <Code title="config/<SCRIPT_MODULE_UUID>/variables.json">{`{
-  "API_BASE_URL": "https://tidy-mandrill-432.convex.site/api/v1",
+  "API_BASE_URL": "https://capable-akita-865.convex.site/api/v1",
   "SERVER_ID": "survival-01",
   "ADDON_ID": "apollo-store",
   "POLL_INTERVAL": 10,
@@ -492,7 +492,7 @@ registerHandler("ADD_RANK", async (d) => { addRank(d.order.client_identifier, d.
             <Code title="scripts/apollo-client.js">{`import { http, HttpRequest, HttpRequestMethod, HttpHeader } from "@minecraft/server-net";
 import { variables, secrets } from "@minecraft/server-admin";
 
-const BASE = variables.get("API_BASE_URL");      // https://tidy-mandrill-432.convex.site/api/v1
+const BASE = variables.get("API_BASE_URL");      // https://capable-akita-865.convex.site/api/v1
 const SERVER_ID = variables.get("SERVER_ID");
 const ADDON_ID = variables.get("ADDON_ID");
 const POLL_INTERVAL = Number(variables.get("POLL_INTERVAL") ?? 10);       // 5-10s
@@ -745,7 +745,7 @@ export function start() {
               <code className="rounded bg-muted px-1">src/lib/store-api-client.ts</code>):
             </p>
             <Code title="store-api-client.ts">{`const storeApi = createStoreApi({
-  baseUrl: "https://tidy-mandrill-432.convex.site/api/v1",
+  baseUrl: "https://capable-akita-865.convex.site/api/v1",
   apiKey: "sk_live_...",
   serverId: "survival-01",
   addonId: "apollo-store",

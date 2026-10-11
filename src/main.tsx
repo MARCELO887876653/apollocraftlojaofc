@@ -2,9 +2,9 @@ import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { ConvexReactClient, useQuery } from "convex/react";
+import { ConvexReactClient, useConvexConnectionState, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import React, { StrictMode, useEffect, lazy, Suspense } from "react";
+import React, { StrictMode, useEffect, useState, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./index.css";
@@ -147,7 +147,14 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+/**
+ * Endereço do deployment Convex usado pelo app — o valor embutido no build a
+ * partir de VITE_CONVEX_URL. Uma URL antiga aqui (ex.: deployment já desativado)
+ * é o motivo mais comum de o app publicado "carregar para sempre", então o
+ * valor também aparece no aviso do ConnectionGuard.
+ */
+const CONVEX_URL = (import.meta.env.VITE_CONVEX_URL as string | undefined)?.trim() ?? "";
+const convex = new ConvexReactClient(CONVEX_URL);
 
 /**
  * Troca o ícone da aba pela imagem cadastrada pela loja (Configurações → Loja)
@@ -198,6 +205,53 @@ function StoreFavicon() {
 
 
 
+/**
+ * Última linha de defesa contra o "carrega para sempre".
+ *
+ * Quando VITE_CONVEX_URL aponta para um deployment errado ou fora do ar, o
+ * cliente nunca conecta: todas as queries ficam pendentes e cada tela (painel,
+ * loja, abas) gira indefinidamente sem dizer o motivo. Aqui, se o cliente não
+ * estabeleceu conexão em 10s, mostramos o endereço realmente usado no build e
+ * a ação de recarregar — em vez do spinner infinito.
+ */
+function ConnectionGuard() {
+  const { hasEverConnected, isWebSocketConnected } = useConvexConnectionState();
+  const [timedOut, setTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (hasEverConnected) {
+      setTimedOut(false);
+      return;
+    }
+    const timer = setTimeout(() => setTimedOut(true), 10000);
+    return () => clearTimeout(timer);
+  }, [hasEverConnected]);
+
+  if (hasEverConnected || !timedOut) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background p-6 text-foreground">
+      <div className="max-w-md text-center">
+        <p className="text-sm font-semibold">Não foi possível conectar ao servidor de dados</p>
+        <p className="mt-2 text-xs break-words text-muted-foreground">
+          O endereço configurado no build é{" "}
+          <code className="font-mono text-[11px]">{CONVEX_URL || "(VITE_CONVEX_URL ausente)"}</code>
+          {isWebSocketConnected ? " e a conexão caiu." : " e a conexão não foi estabelecida."}{" "}
+          Se esse endereço não é o deployment atual da loja, corrija a variável{" "}
+          <code className="font-mono text-[11px]">VITE_CONVEX_URL</code> e publique de novo.
+        </p>
+        <button
+          type="button"
+          className="mt-5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent"
+          onClick={() => window.location.reload()}
+        >
+          Recarregar página
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Sincroniza a rota com o host de preview (Freebuff) via postMessage.
  *  Roda apenas em desenvolvimento e só aceita mensagens vindas da janela pai
  *  (`event.source`) — em produção não expõe listener nem envia mensagens. */
@@ -241,6 +295,7 @@ createRoot(document.getElementById("root")!).render(
         </ToolbarErrorBoundary>
       )}
       <ConvexAuthProvider client={convex}>
+        <ConnectionGuard />
         <ThemeProvider>
           <CartProvider>
             <BrowserRouter>

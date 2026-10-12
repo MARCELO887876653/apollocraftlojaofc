@@ -57,8 +57,23 @@ const escapeHtml = (value) =>
     .replace(/>/g, "&gt;");
 
 /** Monta o bloco de <head> com a bio do link. */
-function renderTags({ meta, tags }) {
-  const lines = [`  <title>${escapeHtml(meta.title)}</title>`];
+function renderTags({ meta, tags }, deploymentUrl) {
+  const lines = [];
+  // Preconnect para o deployment Convex. Tudo que a loja precisa em seguida sai
+  // desse mesmo host: a conexão (WebSocket) das consultas, as chamadas da API e
+  // as imagens do storage. Sem isto o navegador só descobre o host depois de
+  // baixar e executar o JavaScript — aí paga DNS + TLS (e o handshake do
+  // WebSocket) com a página já na tela, o que é justamente o atraso sentido no
+  // celular. Duas linhas porque o navegador mantém sockets separados para
+  // requisições com CORS (API/WebSocket) e sem CORS (imagens).
+  try {
+    const origin = new URL(deploymentUrl).origin;
+    lines.push(`  <link rel="preconnect" href="${escapeHtml(origin)}" />`);
+    lines.push(`  <link rel="preconnect" href="${escapeHtml(origin)}" crossorigin />`);
+  } catch {
+    // Sem URL válida: segue sem preconnect (o resto do bloco continua igual).
+  }
+  lines.push(`  <title>${escapeHtml(meta.title)}</title>`);
   for (const tag of tags) {
     lines.push(
       `  <meta ${tag.attr}="${tag.key}" content="${escapeHtml(tag.content)}" />`,
@@ -82,10 +97,12 @@ async function main() {
   }
 
   let value = null;
+  let servedBy = deploymentCandidates()[0];
   const failures = [];
   for (const url of deploymentCandidates()) {
     try {
       value = await fetchShareMeta(url);
+      servedBy = url;
       break;
     } catch (error) {
       failures.push(`${url}: ${error instanceof Error ? error.message : error}`);
@@ -102,7 +119,7 @@ async function main() {
 
   const next =
     html.slice(0, startLineEnd + 1) +
-    renderTags(value) +
+    renderTags(value, servedBy) +
     "\n  " +
     html.slice(endIndex);
 

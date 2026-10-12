@@ -86,9 +86,14 @@ function Hero() {
           className="absolute inset-0"
           aria-hidden
         >
+          {/* Banner do topo é o candidato a LCP: carrega já (sem lazy) e com
+              prioridade alta, para o navegador não deixá-lo atrás das imagens
+              dos produtos no 4G. */}
           <img
             src={hero.imageDesktop}
             alt=""
+            loading="eager"
+            fetchPriority="high"
             decoding="async"
             className="h-full w-full object-cover"
           />

@@ -23,6 +23,13 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import { CartProvider } from "@/lib/cart";
+// A home é importada de forma ESTÁTICA (as outras rotas continuam lazy).
+// Motivo: ela é a rota inicial, então `lazy()` obrigava o navegador a uma
+// segunda onda de downloads — só depois de baixar e executar o bundle de
+// entrada ele descobria o chunk da home (e os ~27 arquivos dela). Com o import
+// estático, o Vite lista essa árvore no <head> e tudo desce em paralelo com o
+// bundle principal. É o maior ganho de tempo de primeira pintura em celular.
+import Home from "./pages/Home.tsx";
 import { ThemeProvider } from "@/lib/theme";
 import { convexUrlCandidates, deploymentServesStore } from "@/lib/convex-url";
 import { applyShareMeta } from "@/lib/seo";
@@ -37,7 +44,6 @@ if (import.meta.env.DEV) {
 }
 
 // Lazy load route components for better code splitting
-const Home = lazy(() => import("./pages/Home.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const CategoriesPage = lazy(() => import("./pages/Categories.tsx"));
 const CategoryPage = lazy(() => import("./pages/CategoryPage.tsx"));
@@ -77,6 +83,9 @@ const NotFound = lazy(() => import("./pages/NotFound.tsx"));
  * (o que remonta o header e pisca "Loading...") — a troca fica instantânea.
  * São exatamente os mesmos caminhos usados no lazy() acima, então o Vite
  * reaproveita o mesmo chunk.
+ *
+ * A home fica de fora: ela já vem no bundle de entrada (import estático no topo
+ * deste arquivo), então não há chunk para pré-carregar.
  */
 const STORE_ROUTE_LOADERS = [
   () => import("./pages/Categories.tsx"),

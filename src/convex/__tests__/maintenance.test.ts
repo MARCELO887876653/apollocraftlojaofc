@@ -102,3 +102,62 @@ describe("modo manutenção — fila de avisos de retorno", () => {
     expect(result.number).toMatch(/^#/);
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// Quem é "equipe" — é isso que decide se a tela de manutenção aparece
+// (regra pura em src/lib/maintenance.ts, usada pelo StoreLayout).
+//
+// A equipe continua navegando com a loja fechada, então quem está logado como
+// admin vê a loja normal — e o interruptor parecia "não pegar". Agora isso é
+// explícito (aviso na tela + `?cliente=1` para ver a visão do cliente).
+// ─────────────────────────────────────────────────────────────
+
+async function seedAdmin(t: T) {
+  return await t.run(async (ctx) => {
+    const userId = await ctx.db.insert("users", {
+      name: "Dono",
+      email: "dono@example.com",
+    });
+    await ctx.db.insert("adminUsers", {
+      email: "dono@example.com",
+      name: "Dono",
+      userId,
+      role: "owner",
+      permissions: [],
+      active: true,
+      createdAt: Date.now(),
+    });
+    return userId;
+  });
+}
+
+describe("equipe x cliente no modo manutenção", () => {
+  test("visitante não é equipe (vê a tela de manutenção)", async () => {
+    const t = convexTest(schema, modules);
+    await seedAdmin(t);
+    expect(await t.query(api.team.me, {})).toBeNull();
+  });
+
+  test("admin ativo é equipe (navega na loja fechada)", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await seedAdmin(t);
+    const me = await t
+      .withIdentity({ subject: userId, issuer: "test", tokenIdentifier: `test|${userId}` })
+      .query(api.team.me, {});
+    expect(me?.admin?.active).toBe(true);
+    expect(me?.admin?.role).toBe("owner");
+  });
+
+  test("admin desativado deixa de ser equipe", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await seedAdmin(t);
+    await t.run(async (ctx) => {
+      const admin = await ctx.db.query("adminUsers").first();
+      await ctx.db.patch(admin!._id, { active: false });
+    });
+    const me = await t
+      .withIdentity({ subject: userId, issuer: "test", tokenIdentifier: `test|${userId}` })
+      .query(api.team.me, {});
+    expect(me?.admin?.active).toBe(false);
+  });
+});

@@ -6,7 +6,13 @@ import { useCart } from "@/lib/cart";
 import { cn } from "@/lib/utils";
 import { MaintenanceGate } from "@/components/store/MaintenanceGate";
 import {
-  ShoppingBag, ShoppingCart, Menu, X, MessageCircle, User, Check, Search, Loader2,
+  isClientPreview,
+  storeAccess,
+  withClientPreview,
+  withoutClientPreview,
+} from "@/lib/maintenance";
+import {
+  ShoppingBag, ShoppingCart, Menu, X, MessageCircle, User, Check, Search, Loader2, Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -50,23 +56,62 @@ export function StoreLayout({ children }: { children: React.ReactNode }) {
   const navItems = (menu ?? []).filter(Boolean);
   const storeName = store?.name ?? "Apollo Craft";
 
-  const isMaintenance = Boolean(store?.maintenance?.enabled);
+  // Quem vê o quê (regra em @/lib/maintenance, com testes).
+  const clientPreview = isClientPreview(location.search);
   const isStaff = Boolean(team?.admin?.active);
-  if (isMaintenance && !isStaff) {
+  const access = storeAccess({
+    maintenanceEnabled: store?.maintenance?.enabled,
+    teamResolved: team !== undefined,
+    isStaff,
+    clientPreview,
+  });
+
+  if (access === "checking") {
     // Enquanto a equipe ainda está sendo verificada, evita piscar a tela de
     // manutenção para quem pode desligá-la pelo painel.
-    if (team === undefined) {
-      return (
-        <main className="flex min-h-screen items-center justify-center bg-background">
-          <Loader2 className="size-6 animate-spin text-muted-foreground" />
-        </main>
-      );
-    }
-    return <MaintenanceGate store={store} />;
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </main>
+    );
+  }
+
+  if (access === "closed") {
+    return (
+      <MaintenanceGate
+        store={store}
+        // A saída da pré-visualização só faz sentido para a equipe: um cliente
+        // que digite `?cliente=1` vê a tela normal de manutenção.
+        preview={clientPreview && isStaff}
+        exitHref={`${location.pathname}${withoutClientPreview(location.search)}`}
+      />
+    );
   }
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
+      {/* A loja está fechada para os clientes, mas a equipe continua navegando.
+          Sem este aviso o interruptor parecia não fazer nada.
+          Pré-visualização: `?cliente=1` mostra exatamente a tela do cliente. */}
+      {access === "staff" && (
+        <div className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-2xl border border-amber-400/40 bg-amber-950/90 px-4 py-2.5 text-center text-xs font-semibold text-amber-100 shadow-[0_18px_40px_rgb(0,0,0,0.45)] backdrop-blur-xl">
+          <span className="inline-flex items-center gap-1.5">
+            <Wrench className="size-3.5" /> Modo manutenção ativo: seus clientes estão vendo a tela de manutenção.
+          </span>
+          <Link
+            to={{ pathname: location.pathname, search: withClientPreview(location.search) }}
+            className="rounded-full bg-amber-100 px-3 py-1 font-bold text-amber-950 transition-colors hover:bg-white"
+          >
+            Ver como cliente
+          </Link>
+          <Link
+            to="/painel/configuracoes"
+            className="rounded-full border border-amber-100/40 px-3 py-1 font-bold text-amber-100 transition-colors hover:bg-amber-100/10"
+          >
+            Desligar
+          </Link>
+        </div>
+      )}
       <header
         className={cn(
           "sticky top-0 z-40 border-b transition-all duration-300",

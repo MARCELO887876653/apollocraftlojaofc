@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import { motion } from "framer-motion";
+import { Link } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { friendlyErrorMessage } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { CheckCircle2, Clock, Loader2, Mail, ShoppingBag, Wrench } from "lucide-react";
+import {
+  ArrowLeft, CheckCircle2, Clock, Loader2, Mail, ShoppingBag, Wrench,
+} from "lucide-react";
 
 type MaintenanceStore = {
   name?: string;
@@ -17,8 +20,20 @@ type MaintenanceStore = {
 /**
  * Loja fechada para manutenção: ninguém navega nem compra, mas o cliente pode
  * deixar o e-mail para ser avisado quando a loja voltar.
+ *
+ * `preview` é verdadeiro quando quem está vendo é a equipe com `?cliente=1` —
+ * é a forma de o dono conferir exatamente o que o cliente vê. Nesse caso
+ * mostramos a saída da pré-visualização.
  */
-export function MaintenanceGate({ store }: { store?: MaintenanceStore }) {
+export function MaintenanceGate({
+  store,
+  preview,
+  exitHref,
+}: {
+  store?: MaintenanceStore;
+  preview?: boolean;
+  exitHref?: string;
+}) {
   const subscribe = useMutation(api.maintenance.subscribe);
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
@@ -162,6 +177,17 @@ export function MaintenanceGate({ store }: { store?: MaintenanceStore }) {
         <p className="mt-6 text-center text-xs text-muted-foreground">
           {storeName} — a loja reabre assim que a manutenção terminar.
         </p>
+
+        {preview && (
+          <p className="mt-3 text-center">
+            <Link
+              to={exitHref ?? "/"}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/70 px-3.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="size-3.5" /> Sair da visão de cliente (voltar à equipe)
+            </Link>
+          </p>
+        )}
       </motion.div>
     </div>
   );

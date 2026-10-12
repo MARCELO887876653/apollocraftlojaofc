@@ -407,6 +407,30 @@ export default function AdminSettings() {
             Ativar manutenção (loja fechada para clientes)
             <Switch checked={form.maintenance.enabled} onCheckedChange={(v) => set("maintenance", { ...form.maintenance, enabled: v })} />
           </label>
+
+          {/* Estado que está NO AR (não o do formulário): o interruptor sozinho
+              não dizia se a loja já estava fechada — e a equipe continua vendo a
+              loja normal, o que fazia parecer que a manutenção "não pegava". */}
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-xs">
+            <span className={store?.maintenance.enabled ? "font-bold text-amber-500" : "text-muted-foreground"}>
+              {store?.maintenance.enabled
+                ? "Loja fechada agora: os clientes veem a tela de manutenção (o carrinho e o checkout ficam bloqueados)."
+                : "Loja aberta: os clientes navegam e compram normalmente."}
+            </span>
+            {store && form.maintenance.enabled !== store.maintenance.enabled && (
+              <span className="font-semibold text-sky-400">alteração não salva ainda</span>
+            )}
+            <Button asChild variant="outline" size="sm" className="ml-auto h-7 px-2.5 text-[11px]">
+              <a href="/?cliente=1" target="_blank" rel="noreferrer">
+                Ver como cliente
+              </a>
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Quem é da equipe (admin ativo) continua navegando na loja fechada — no lugar disso a loja mostra um aviso
+            no rodapé da tela. O link acima abre a loja com <code className="rounded bg-muted px-1">?cliente=1</code>,
+            que mostra exatamente a visão do cliente.
+          </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label>Título</Label>

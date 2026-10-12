@@ -142,6 +142,33 @@ ADDON_ID=economy`}</Code>
               Crie a chave no painel em <strong>Integrações → API de entregas automáticas</strong>. Ela é
               exibida <strong>uma única vez</strong>; guarde-a em local seguro. O servidor armazena apenas o hash.
             </p>
+
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-amber-200/90">
+              <strong>HTTP 500 em todas as chamadas (inclusive no teste de autenticação)?</strong> Então a
+              requisição não chegou nesta API — o problema é o <code className="rounded bg-muted px-1">API_BASE_URL</code>,
+              não a chave. Trocar a chave não resolve. Como distinguir pelo corpo da resposta:
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                <code className="rounded bg-muted px-1">500</code> com{" "}
+                <code className="rounded bg-muted px-1">{"{ \"code\": \"[Request ID: …] Server Error\" }"}</code> — erro cru do Convex
+                antes de executar o código da loja: o endereço aponta para outro deployment (tipicamente um criado
+                pelo <code className="rounded bg-muted px-1">convex dev</code>, que expira) ou para um backend fora do ar.
+              </li>
+              <li>
+                <code className="rounded bg-muted px-1">401</code> com{" "}
+                <code className="rounded bg-muted px-1">{"{ \"errors\": [{ \"code\": \"MISSING_API_KEY\" }] }"}</code> — endereço{" "}
+                <strong>certo</strong> e API no ar (é a resposta esperada numa chamada sem chave).
+              </li>
+              <li><code className="rounded bg-muted px-1">403 FORBIDDEN_SCOPE</code> — endereço certo, faltou permissão na chave.</li>
+              <li><code className="rounded bg-muted px-1">404</code> — o endereço existe, mas não tem a API v1 (confira <code className="rounded bg-muted px-1">/api/v1</code> no fim).</li>
+              <li><code className="rounded bg-muted px-1">500 INTERNAL_ERROR</code> em JSON no padrão da loja — aí sim é defeito interno: veja os logs do deployment e informe o <em>Request ID</em>.</li>
+            </ul>
+            <p>
+              Para conferir em um clique, o painel faz a chamada pelo servidor:{" "}
+              <strong>Integrações → API de entregas automáticas → Verificar o endereço configurado no addon</strong>.
+              Ela não envia chave nenhuma e diz se o endereço responde como esta API.
+            </p>
           </Section>
 
           <Section id="auth" icon={ShieldCheck} title="Autenticação e scopes">

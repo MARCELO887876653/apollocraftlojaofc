@@ -70,6 +70,18 @@ export const internalTouchKey = internalMutation({
 
 // ─── Admin: gerenciar chaves ───
 
+/**
+ * Só valida a sessão admin. Existe para as ACTIONS (que não têm `ctx.db`)
+ * autorizarem por uma query antes de fazer chamadas externas.
+ */
+export const assertAdmin = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx, "integrations.manage");
+    return true;
+  },
+});
+
 export const list = query({
   args: {},
   handler: async (ctx) => {

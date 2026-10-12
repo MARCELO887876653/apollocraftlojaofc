@@ -15,8 +15,14 @@ import { toast } from "sonner";
 import {
   Loader2, CheckCircle2, XCircle, CreditCard, Gamepad2, KeyRound, Copy,
   Plus, Trash2, RefreshCw, Server, ShieldCheck, Ban, Activity, Plug,
-  Webhook, Send, Pencil,
+  Webhook, Send, Pencil, AlertTriangle,
 } from "lucide-react";
+import { STORE_DEPLOYMENT_URL } from "@/lib/convex-url";
+import {
+  storeApiBaseUrl,
+  type EndpointProbeResult,
+  type EndpointVerdict,
+} from "@/convex/lib/apiEndpoint";
 
 type Integrations = {
   mercadopago: {
@@ -558,8 +564,6 @@ function ApiV1Section() {
   const [creating, setCreating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-
   const toggleScope = (s: string) =>
     setScopes((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
 
@@ -597,11 +601,12 @@ function ApiV1Section() {
         </div>
         <CardDescription>
           A fila de entregas automáticas que seus addons consomem. Cada chave pode ser limitada a um
-          servidor e a um addon, com permissões (scopes) específicas. Base URL:{" "}
-          <code className="rounded bg-muted px-1">{origin}/api/v1</code>. Token armazenado apenas como hash.
+          servidor e a um addon, com permissões (scopes) específicas. Token armazenado apenas como hash.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        <ApiV1EndpointCheck />
+
         <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
@@ -776,6 +781,130 @@ function ApiV1Section() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Endpoint do addon: qual API_BASE_URL usar e se ela responde de verdade
+//
+// Um addon apontando para o endereço errado (tipicamente o deployment de
+// desenvolvimento do `convex dev`, que expira) recebe HTTP 500 em TODA rota —
+// inclusive no teste de autenticação — e nada aparece na fila. O teste abaixo
+// faz a chamada do servidor (sem chave) e diz exatamente o que aconteceu.
+// ─────────────────────────────────────────────────────────────
+
+const PRODUCTION_API_BASE_URL = storeApiBaseUrl(STORE_DEPLOYMENT_URL);
+
+const VERDICT_STYLE: Record<EndpointVerdict, { label: string; className: string }> = {
+  ok: { label: "API no ar", className: "bg-emerald-500/15 text-emerald-600" },
+  dead_deployment: { label: "Endereço errado / backend morto", className: "bg-red-500/15 text-red-600" },
+  not_found: { label: "Sem API v1 neste endereço", className: "bg-amber-500/15 text-amber-700" },
+  api_error: { label: "Erro interno na loja", className: "bg-red-500/15 text-red-600" },
+  unexpected: { label: "Resposta inesperada", className: "bg-amber-500/15 text-amber-700" },
+  network: { label: "Sem resposta", className: "bg-amber-500/15 text-amber-700" },
+};
+
+function ApiV1EndpointCheck() {
+  const probe = useAction(api.apiV1Probe.probeEndpoint);
+  const [url, setUrl] = useState(PRODUCTION_API_BASE_URL);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<EndpointProbeResult | null>(null);
+
+  const run = async () => {
+    setRunning(true);
+    try {
+      setResult(await probe({ url }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao verificar o endereço");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const style = result ? VERDICT_STYLE[result.verdict] : null;
+
+  return (
+    <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+      <div>
+        <Label>Endereço da API para o addon (API_BASE_URL)</Label>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded-lg border bg-background px-3 py-2 text-xs">
+            {PRODUCTION_API_BASE_URL}
+          </code>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={async () => {
+              await navigator.clipboard.writeText(PRODUCTION_API_BASE_URL);
+              toast.success("Endereço copiado!");
+            }}
+          >
+            <Copy className="mr-1.5 size-3.5" /> Copiar
+          </Button>
+        </div>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          É este o endereço de produção da loja. Endereços de desenvolvimento do Convex
+          (<code className="rounded bg-muted px-1">&lt;deployment&gt;.convex.site</code> criados pelo{" "}
+          <code className="rounded bg-muted px-1">convex dev</code>) param de responder e devolvem 500 em tudo.
+        </p>
+      </div>
+
+      <Separator />
+
+      <div>
+        <Label>Verificar o endereço configurado no addon</Label>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Cole aqui o <code className="rounded bg-muted px-1">API_BASE_URL</code> do seu addon (aceita o endereço
+          do site, com ou sem <code className="rounded bg-muted px-1">/api/v1</code>). A chamada é feita pelo
+          servidor, sem enviar chave nenhuma.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://SEU-DEPLOYMENT.convex.site/api/v1"
+            className="min-w-0 flex-1"
+          />
+          <Button onClick={run} disabled={running || !url.trim()}>
+            {running ? (
+              <Loader2 className="mr-2 size-4 animate-spin" />
+            ) : (
+              <Plug className="mr-2 size-4" />
+            )}
+            Verificar
+          </Button>
+        </div>
+      </div>
+
+      {result && style && (
+        <div className="space-y-2 rounded-lg border bg-card p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {result.verdict === "ok" ? (
+              <CheckCircle2 className="size-4 text-emerald-600" />
+            ) : result.verdict === "dead_deployment" || result.verdict === "api_error" ? (
+              <XCircle className="size-4 text-red-600" />
+            ) : (
+              <AlertTriangle className="size-4 text-amber-600" />
+            )}
+            <Badge variant="outline" className={style.className}>
+              {style.label}
+            </Badge>
+            <span className="font-mono text-xs text-muted-foreground">
+              {result.status === null ? "sem resposta" : `HTTP ${result.status}`}
+            </span>
+            <code className="ml-auto truncate font-mono text-[10px] text-muted-foreground">
+              {result.baseUrl}
+            </code>
+          </div>
+          <p className="text-sm">{result.message}</p>
+          {result.snippet && (
+            <pre className="max-h-24 overflow-auto rounded bg-muted px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
+              {result.snippet}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Diagnóstico das integrações: chaves, servidores e "Testar integração"
 // ─────────────────────────────────────────────────────────────
 
@@ -900,6 +1029,11 @@ function KeyTestDialog({ keyId, onClose }: { keyId: string; onClose: () => void 
             Valida se a chave está ativa, com escopos, com vínculo definido e com heartbeat recente.
             O segredo nunca é exibido.
           </DialogDescription>
+          <p className="text-xs text-muted-foreground">
+            Isto olha só o cadastro da chave. Se o addon recebe <strong>500 em todas</strong> as chamadas
+            (inclusive no teste de autenticação), o problema é o endereço configurado nele — use
+            “Verificar” no cartão da API v1 acima.
+          </p>
         </DialogHeader>
         {res === undefined ? (
           <Loader2 className="mx-auto size-5 animate-spin" />

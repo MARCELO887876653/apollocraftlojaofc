@@ -699,3 +699,265 @@ describe("roteador HTTP /api/v1", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://apollocraft.online");
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// Vínculos de servidor/addon no handshake
+//
+// O addon do incidente estava configurado com server_id "survival-01" e
+// addon_id "apollo-store": o /me precisa devolver exatamente esse vínculo
+// (e `GLOBAL` quando a chave não é limitada a um servidor).
+// ─────────────────────────────────────────────────────────────
+
+describe("vínculos no /me", () => {
+  test("chave de survival-01 + apollo-store devolve o vínculo e as capacidades", async () => {
+    const t = convexTest(schema, modules);
+    const { token } = await newKey(t, [...FULL_SCOPES, "deliveries:claim"], {
+      serverId: "survival-01",
+      addonId: "apollo-store",
+    });
+    const res = await callV1(t, token, "GET", "/api/v1/app/me");
+    expect(res.status).toBe(200);
+    const body = res.body as any;
+    expect(body.server_id).toBe("survival-01");
+    expect(body.addon_id).toBe("apollo-store");
+    expect(body.binding).toEqual({ server_id: "survival-01", addon_id: "apollo-store" });
+    expect(body.capabilities.delivery_claim).toBe(true);
+    expect(body.authenticated).toBe(true);
+    // nunca devolve o token nem o hash
+    expect(JSON.stringify(body)).not.toContain(token);
+  });
+
+  test("chave sem vínculo é GLOBAL e sem addon", async () => {
+    const t = convexTest(schema, modules);
+    const { token } = await newKey(t, FULL_SCOPES);
+    const res = await callV1(t, token, "GET", "/api/v1/app/me");
+    expect((res.body as any).server_id).toBe("GLOBAL");
+    expect((res.body as any).addon_id).toBeNull();
+    expect((res.body as any).binding).toEqual({ server_id: "GLOBAL", addon_id: null });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// /me pela rota HTTP real — é o "testar conexão" do addon
+// ─────────────────────────────────────────────────────────────
+
+describe("/me pela rota HTTP real", () => {
+  const me = (t: T, headers: Record<string, string>) =>
+    t.fetch("/api/v1/app/me", { method: "GET", headers });
+
+  test("chave válida → 200 com vínculo, sem nunca devolver o token", async () => {
+    const t = convexTest(schema, modules);
+    const { token } = await newKey(t, [...FULL_SCOPES, "deliveries:claim"], {
+      serverId: "survival-01",
+      addonId: "apollo-store",
+    });
+    const res = await me(t, { Authorization: `Bearer ${token}` });
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(raw).not.toContain(token);
+    const body = JSON.parse(raw) as any;
+    expect(body.binding).toEqual({ server_id: "survival-01", addon_id: "apollo-store" });
+  });
+
+  test("sem chave → 401 MISSING_API_KEY em JSON", async () => {
+    const t = convexTest(schema, modules);
+    const res = await me(t, {});
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).errors[0].code).toBe("MISSING_API_KEY");
+  });
+
+  test("chave inválida → 401 INVALID_API_KEY (nunca 500)", async () => {
+    const t = convexTest(schema, modules);
+    const res = await me(t, { Authorization: "Bearer sk_live_0000000000000000" });
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).errors[0].code).toBe("INVALID_API_KEY");
+  });
+
+  test("chave revogada → 401 API_KEY_REVOKED", async () => {
+    const t = convexTest(schema, modules);
+    const { id, token } = await newKey(t, FULL_SCOPES, { serverId: "survival-01" });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(id, { active: false, revokedAt: Date.now() });
+    });
+    const res = await me(t, { Authorization: `Bearer ${token}` });
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).errors[0].code).toBe("API_KEY_REVOKED");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Claim pela rota HTTP real — o endpoint que o addon chama
+// (POST /api/v1/app/queued_commands/claim)
+//
+// No incidente de 12/10/2026 o addon recebeu HTTP 500 em tudo: o endereço
+// configurado nele não era o desta loja (a chamada morria antes de chegar
+// aqui). Estes testes fixam o que a LOJA responde quando a chamada chega:
+// fila vazia é 200 com lista vazia (nunca erro), chave sem permissão é 401,
+// chave com pouca permissão é 403 e uma entrega nunca sai duas vezes.
+// ─────────────────────────────────────────────────────────────
+
+const CLAIM_SCOPES = [...FULL_SCOPES, "deliveries:claim"];
+
+async function claimViaHttp(t: T, token: string, body: unknown = { limit: 5 }) {
+  return await t.fetch("/api/v1/app/queued_commands/claim", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("claim pela rota HTTP real", () => {
+  test("fila vazia → 200 com { data: [], count: 0 } (nunca 500)", async () => {
+    const t = convexTest(schema, modules);
+    const { token } = await newKey(t, CLAIM_SCOPES, { serverId: "survival-01", addonId: "apollo-store" });
+    const res = await claimViaHttp(t, token);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body).toEqual({ data: [], count: 0 });
+  });
+
+  test("entrega compatível é reservada com claim_token e sai da fila", async () => {
+    const t = convexTest(schema, modules);
+    const { orderId } = await seedPaidOrder(t, [
+      {
+        action: "ADD_MONEY",
+        payload: { amount: 10000 },
+        addonId: "apollo-store",
+        serverId: "survival-01",
+        offlineExecute: true,
+      },
+    ]);
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+    const { token } = await newKey(t, CLAIM_SCOPES, { serverId: "survival-01", addonId: "apollo-store" });
+
+    const res = await claimViaHttp(t, token, { limit: 5, addon_id: "apollo-store" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.count).toBe(1);
+    const claimed = body.data[0];
+    expect(claimed.status).toBe("PROCESSING");
+    expect(claimed.claim_token).toMatch(/^clm_/);
+    expect(claimed.server_id).toBe("survival-01");
+    expect(claimed.addon_id).toBe("apollo-store");
+    expect(claimed.claim_expires_at).toBeTruthy();
+    // snapshot do pedido vai junto (o addon não precisa consultar a loja)
+    expect(claimed.order.id).toMatch(/^#TEST/);
+    expect(claimed.order.client_identifier).toBe("Steve123");
+
+    // a fila de leitura não devolve mais o comando reservado
+    const { token: readToken } = await newKey(t, ["deliveries:read"], { serverId: "survival-01" });
+    const queue = await callV1(t, readToken, "GET", "/api/v1/app/queued_commands");
+    expect(queue.body as any[]).toHaveLength(0);
+  });
+
+  test("claims concorrentes nunca entregam o mesmo comando duas vezes", async () => {
+    const t = convexTest(schema, modules);
+    const { orderId } = await seedPaidOrder(t);
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+    const { token } = await newKey(t, CLAIM_SCOPES, { serverId: "survival-01" });
+
+    const [a, b] = await Promise.all([claimViaHttp(t, token), claimViaHttp(t, token)]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const total =
+      ((await a.json()) as any).count + ((await b.json()) as any).count;
+    expect(total).toBe(1);
+
+    const commands = await listCommands(t);
+    expect(commands).toHaveLength(1);
+    expect(commands[0].status).toBe("PROCESSING");
+    expect(commands[0].attempts).toBe(1);
+  });
+
+  test("confirmar a mesma entrega duas vezes é idempotente (sem efeito duplicado)", async () => {
+    const t = convexTest(schema, modules);
+    const { orderId } = await seedPaidOrder(t);
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+    const { token } = await newKey(t, CLAIM_SCOPES, { serverId: "survival-01" });
+
+    const claimed = (await (await claimViaHttp(t, token)).json()) as any;
+    const id = claimed.data[0].id;
+    const claimToken = claimed.data[0].claim_token;
+
+    const confirm = () =>
+      t.fetch(`/api/v1/app/command/${id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "DONE", claim_token: claimToken, response: "entregue" }),
+      });
+
+    const first = await confirm();
+    const second = await confirm();
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+
+    const attempts = await t.run(async (ctx) => await ctx.db.query("deliveryAttempts").collect());
+    expect(attempts.filter((a) => a.finishedAt !== undefined)).toHaveLength(1);
+  });
+
+  test("sem claim_token a entrega reservada não é confirmada (409)", async () => {
+    const t = convexTest(schema, modules);
+    const { orderId } = await seedPaidOrder(t);
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+    const { token } = await newKey(t, CLAIM_SCOPES, { serverId: "survival-01" });
+    const claimed = (await (await claimViaHttp(t, token)).json()) as any;
+
+    const res = await t.fetch(`/api/v1/app/command/${claimed.data[0].id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "DONE" }),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as any).errors[0].code).toBe("CLAIM_INVALID");
+  });
+
+  test("chave revogada → 401 (não 500)", async () => {
+    const t = convexTest(schema, modules);
+    const { id, token } = await newKey(t, CLAIM_SCOPES, { serverId: "survival-01" });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(id, { active: false, revokedAt: Date.now() });
+    });
+    const res = await claimViaHttp(t, token);
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).errors[0].code).toBe("API_KEY_REVOKED");
+  });
+
+  test("sem cabeçalho de autenticação → 401", async () => {
+    const t = convexTest(schema, modules);
+    const res = await t.fetch("/api/v1/app/queued_commands/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 5 }),
+    });
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).errors[0].code).toBe("MISSING_API_KEY");
+  });
+
+  test("chave só com deliveries:read → 403 (não reserva nada)", async () => {
+    const t = convexTest(schema, modules);
+    const { orderId } = await seedPaidOrder(t);
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+    const { token } = await newKey(t, ["deliveries:read"], { serverId: "survival-01" });
+
+    const res = await claimViaHttp(t, token);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as any).errors[0].code).toBe("FORBIDDEN_SCOPE");
+    // a entrega continua disponível — nada foi reservado
+    const commands = await listCommands(t);
+    expect(commands[0].status).toBe("PENDING");
+    expect(commands[0].claimToken).toBeUndefined();
+  });
+
+  test("chave de outro servidor não reserva entrega de survival-01", async () => {
+    const t = convexTest(schema, modules);
+    const { orderId } = await seedPaidOrder(t, [
+      { action: "ADD_MONEY", payload: {}, serverId: "survival-01", offlineExecute: true },
+    ]);
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+    const { token } = await newKey(t, CLAIM_SCOPES, { serverId: "skyblock-01" });
+    const res = await claimViaHttp(t, token);
+    const body = (await res.json()) as any;
+    expect(body.count).toBe(0);
+    expect((await listCommands(t))[0].status).toBe("PENDING");
+  });
+});

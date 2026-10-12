@@ -37,6 +37,7 @@ import type * as lib_data from "../lib/data.js";
 import type * as lib_defaultPages from "../lib/defaultPages.js";
 import type * as lib_deliveryRecipe from "../lib/deliveryRecipe.js";
 import type * as lib_hash from "../lib/hash.js";
+import type * as lib_seo from "../lib/seo.js";
 import type * as logs from "../logs.js";
 import type * as maintenance from "../maintenance.js";
 import type * as maintenanceEmails from "../maintenanceEmails.js";
@@ -89,6 +90,7 @@ declare const fullApi: ApiFromModules<{
   "lib/defaultPages": typeof lib_defaultPages;
   "lib/deliveryRecipe": typeof lib_deliveryRecipe;
   "lib/hash": typeof lib_hash;
+  "lib/seo": typeof lib_seo;
   logs: typeof logs;
   maintenance: typeof maintenance;
   maintenanceEmails: typeof maintenanceEmails;

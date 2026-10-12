@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ImageUpload } from "@/components/admin/ImageUpload";
+import { LinkPreviewCard } from "@/components/admin/LinkPreviewCard";
+import { buildShareMeta } from "@/convex/lib/seo";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 
@@ -16,7 +18,15 @@ type Store = {
   instagram: string; twitter: string; youtube: string;
   maintenance: { enabled: boolean; title: string; message: string; eta: string };
   checkoutFields: Array<{ key: string; label: string; enabled: boolean; required: boolean }>;
-  seo: { title: string; description: string; ogImage: string; canonical: string };
+  seo: {
+    title: string;
+    description: string;
+    ogImage: string;
+    ogImageAnimated?: boolean;
+    siteName?: string;
+    themeColor?: string;
+    canonical: string;
+  };
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -39,6 +49,23 @@ export default function AdminSettings() {
   useEffect(() => {
     if (store && !form) setForm(store);
   }, [store, form]);
+
+  // A MESMA função que o servidor usa para montar a bio do link: a prévia do
+  // painel não pode divergir do que sai publicado.
+  const previewMeta = useMemo(
+    () =>
+      buildShareMeta(
+        form
+          ? {
+              name: form.name,
+              description: form.description,
+              logoUrl: form.logoUrl,
+              seo: form.seo,
+            }
+          : null,
+      ),
+    [form],
+  );
 
   if (!form) return <Loader2 className="mx-auto size-5 animate-spin" />;
 
@@ -64,7 +91,15 @@ export default function AdminSettings() {
         youtube: form.youtube,
         maintenance: form.maintenance,
         checkoutFields: form.checkoutFields,
-        seo: { ...form.seo, ogImage: form.seo.ogImage || undefined, canonical: form.seo.canonical || undefined },
+        seo: {
+          title: form.seo.title,
+          description: form.seo.description,
+          ogImage: form.seo.ogImage || undefined,
+          ogImageAnimated: Boolean(form.seo.ogImageAnimated),
+          siteName: form.seo.siteName || undefined,
+          themeColor: form.seo.themeColor || undefined,
+          canonical: form.seo.canonical || undefined,
+        },
         },
       });
       toast.success("Configurações salvas!");
@@ -182,20 +217,127 @@ export default function AdminSettings() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">SEO</CardTitle></CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label>Título (title tag)</Label>
-            <Input value={form.seo.title} onChange={(e) => set("seo", { ...form.seo, title: e.target.value })} />
+        <CardHeader>
+          <CardTitle className="text-base">Bio do link</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            O card que aparece quando alguém cola o endereço da loja no Discord, WhatsApp ou
+            Telegram — aceita imagem e GIF animado.
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-5 lg:grid-cols-2">
+          <div className="space-y-4">
+            <div>
+              <Label>Título do link</Label>
+              <Input
+                maxLength={70}
+                value={form.seo.title}
+                onChange={(e) => set("seo", { ...form.seo, title: e.target.value })}
+                placeholder="Apollo Craft — Loja Oficial"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {form.seo.title.length}/70 · aparece em negrito, como link.
+              </p>
+            </div>
+
+            <div>
+              <Label>Descrição</Label>
+              <Input
+                maxLength={200}
+                value={form.seo.description}
+                onChange={(e) => set("seo", { ...form.seo, description: e.target.value })}
+                placeholder="Compre VIPs, cash e upgrades com entrega automática…"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {form.seo.description.length}/200 · duas ou três linhas do que a loja entrega.
+              </p>
+            </div>
+
+            <ImageUpload
+              label="Capa do link (imagem ou GIF)"
+              aspect="wide"
+              value={form.seo.ogImage || undefined}
+              onChange={(v) =>
+                set("seo", {
+                  ...form.seo,
+                  ogImage: v ?? "",
+                  ogImageAnimated: v ? form.seo.ogImageAnimated : false,
+                })
+              }
+              onFileType={(mime) =>
+                set("seo", { ...form.seo, ogImageAnimated: mime === "image/gif" })
+              }
+            />
+
+            <label className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm">
+              <span className="min-w-0">
+                <span className="block font-medium">A capa é um GIF animado</span>
+                <span className="block text-xs text-muted-foreground">
+                  O Discord anima o card; WhatsApp e Google mostram o primeiro quadro.
+                </span>
+              </span>
+              <Switch
+                checked={Boolean(form.seo.ogImageAnimated)}
+                onCheckedChange={(v) => set("seo", { ...form.seo, ogImageAnimated: v })}
+              />
+            </label>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Nome do site</Label>
+                <Input
+                  value={form.seo.siteName ?? ""}
+                  onChange={(e) => set("seo", { ...form.seo, siteName: e.target.value })}
+                  placeholder={form.name || "Apollo Craft"}
+                />
+              </div>
+              <div>
+                <Label>Endereço oficial (opcional)</Label>
+                <Input
+                  value={form.seo.canonical ?? ""}
+                  onChange={(e) => set("seo", { ...form.seo, canonical: e.target.value })}
+                  placeholder="https://apollocraft.online"
+                />
+              </div>
+              <div>
+                <Label>Cor da barra do celular</Label>
+                <div className="mt-1.5 flex gap-2">
+                  <input
+                    type="color"
+                    aria-label="Cor da barra do celular"
+                    value={/^#[0-9a-f]{6}$/i.test(form.seo.themeColor ?? "") ? form.seo.themeColor! : "#0b1017"}
+                    onChange={(e) => set("seo", { ...form.seo, themeColor: e.target.value })}
+                    className="h-9 w-12 shrink-0 cursor-pointer rounded-md border"
+                  />
+                  <Input
+                    value={form.seo.themeColor ?? ""}
+                    onChange={(e) => set("seo", { ...form.seo, themeColor: e.target.value })}
+                    placeholder="#0b1017"
+                    className="font-mono text-xs"
+                  />
+                </div>
+              </div>
+              <div className="flex items-end">
+                <p className="text-xs text-muted-foreground">
+                  Sem capa própria, usamos a logo da loja.
+                </p>
+              </div>
+            </div>
           </div>
-          <ImageUpload
-            label="Imagem Open Graph (compartilhamento)"
-            value={form.seo.ogImage || undefined}
-            onChange={(v) => set("seo", { ...form.seo, ogImage: v ?? "" })}
-          />
-          <div className="sm:col-span-2">
-            <Label>Meta description</Label>
-            <Input value={form.seo.description} onChange={(e) => set("seo", { ...form.seo, description: e.target.value })} />
+
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Prévia no Discord
+            </p>
+            <LinkPreviewCard meta={previewMeta} />
+            <p className="text-xs text-muted-foreground">
+              Capa ideal: 1200×630 (JPG/PNG) ou um GIF curto de até 8 MB. A prévia acima usa o que
+              está no formulário — clique em <strong>Salvar tudo</strong> para gravar.
+            </p>
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+              Discord e WhatsApp leem a bio do <strong>site publicado</strong> (os robôs deles não
+              rodam o site), então depois de salvar <strong>publique a loja</strong> para o card
+              mudar. O aplicativo costuma guardar a última prévia em cache por algumas horas.
+            </p>
           </div>
         </CardContent>
       </Card>

@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { getSetting, setSetting, DEFAULT_STORE, DEFAULT_THEME, DEFAULT_HOMEPAGE } from "./lib/data";
 import { DEFAULT_PAGES } from "./lib/defaultPages";
+import { buildShareMeta, shareMetaTags } from "./lib/seo";
 
 /**
  * Migration idempotente: garante Apollo Craft + tema azul/navy. Só preenche o
@@ -129,6 +130,22 @@ export const getFooter = query({
   },
 });
 
+/**
+ * Bio do link (compartilhamento): os dados e as tags <head> que o Discord,
+ * WhatsApp, Telegram e o Google usam ao compartilhar a loja. Público de
+ * propósito — o card é justamente o que aparece para quem ainda não entrou.
+ * `tags` já vem resolvido do servidor para o app e o build usarem a MESMA lista.
+ */
+export const getShareMeta = query({
+  args: {},
+  handler: async (ctx) => {
+    const store = (await getSetting(ctx, "store")) as any;
+    const theme = (await getSetting(ctx, "theme")) as any;
+    const meta = buildShareMeta(store ?? DEFAULT_STORE, theme ?? DEFAULT_THEME);
+    return { meta, tags: shareMetaTags(meta) };
+  },
+});
+
 export const isMaintenance = query({
   args: {},
   handler: async (ctx) => {
@@ -196,6 +213,11 @@ const storePatch = v.object({
       title: v.string(),
       description: v.string(),
       ogImage: v.optional(v.string()),
+      // GIF animado na capa do link (o Discord anima o card; WhatsApp/Google
+      // mostram o primeiro quadro).
+      ogImageAnimated: v.optional(v.boolean()),
+      siteName: v.optional(v.string()),
+      themeColor: v.optional(v.string()),
       canonical: v.optional(v.string()),
     }),
   ),

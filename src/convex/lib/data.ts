@@ -78,6 +78,9 @@ export const DEFAULT_STORE = {
     title: "Apollo Craft — Loja Oficial",
     description: "Compre VIPs, cash e upgrades com entrega automática e pagamento seguro via PIX.",
     ogImage: "",
+    ogImageAnimated: false,
+    siteName: "Apollo Craft",
+    themeColor: "#0b1017",
     canonical: "",
   },
 };

@@ -12,13 +12,24 @@ type Props = {
   value?: string;
   onChange: (url: string | undefined) => void;
   aspect?: "square" | "wide";
+  /**
+   * Recebe o tipo do arquivo enviado (ex.: "image/gif"). Usado pela bio do
+   * link para marcar uma capa animada sem o admin precisar dizer o formato.
+   */
+  onFileType?: (mimeType: string) => void;
 };
 
 /**
  * Campo de imagem que permite escolher uma foto do celular/computador
  * (além de colar uma URL). O arquivo vai direto para o storage do Convex.
  */
-export function ImageUpload({ label, value, onChange, aspect = "square" }: Props) {
+export function ImageUpload({
+  label,
+  value,
+  onChange,
+  aspect = "square",
+  onFileType,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [showUrl, setShowUrl] = useState(false);
@@ -28,11 +39,13 @@ export function ImageUpload({ label, value, onChange, aspect = "square" }: Props
 
   const upload = async (file: File) => {
     if (!file.type.startsWith("image/")) {
-      toast.error("Selecione um arquivo de imagem (JPG, PNG, WEBP…)");
+      toast.error("Selecione um arquivo de imagem (JPG, PNG, WEBP, GIF…)");
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Imagem muito grande (máx. 5 MB)");
+    // GIFs animados costumam passar de 5 MB; damos um pouco mais de espaço.
+    const limit = file.type === "image/gif" ? 8 : 5;
+    if (file.size > limit * 1024 * 1024) {
+      toast.error(`Arquivo muito grande (máx. ${limit} MB)`);
       return;
     }
     setUploading(true);
@@ -47,6 +60,7 @@ export function ImageUpload({ label, value, onChange, aspect = "square" }: Props
       const { storageId } = (await res.json()) as { storageId: string };
       const { url } = await finalizeUpload({ storageId: storageId as any });
       onChange(url);
+      onFileType?.(file.type || "");
       toast.success("Imagem enviada!");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erro ao enviar imagem");
@@ -92,7 +106,7 @@ export function ImageUpload({ label, value, onChange, aspect = "square" }: Props
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.gif"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -109,7 +123,7 @@ export function ImageUpload({ label, value, onChange, aspect = "square" }: Props
             onClick={() => inputRef.current?.click()}
           >
             {uploading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <ImagePlus className="mr-2 size-4" />}
-            {uploading ? "Enviando…" : "Escolher foto"}
+            {uploading ? "Enviando…" : "Escolher imagem ou GIF"}
           </Button>
           <button
             type="button"

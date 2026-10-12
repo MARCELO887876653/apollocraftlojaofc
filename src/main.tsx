@@ -25,6 +25,8 @@ import "./index.css";
 import { CartProvider } from "@/lib/cart";
 import { ThemeProvider } from "@/lib/theme";
 import { convexUrlCandidates, deploymentServesStore } from "@/lib/convex-url";
+import { applyShareMeta } from "@/lib/seo";
+import type { ShareMeta, ShareMetaTag } from "@/convex/lib/seo";
 
 // Preview/captura de tela do ambiente Freebuff: carregado SOMENTE em
 // desenvolvimento. Em produção este import dinâmico é eliminado pelo Vite
@@ -243,6 +245,27 @@ function StoreFavicon() {
 
 
 /**
+ * Aplica a "bio do link" (título, descrição, imagem/GIF) no <head> da página.
+ *
+ * O que o Discord/WhatsApp mostram vem do HTML publicado — os robôs deles não
+ * rodam JavaScript (ver `scripts/inject-seo-tags.mjs`, que grava as MESMAS tags
+ * no build). Aqui a loja passa a refletir a bio editada no painel na hora, no
+ * navegador, sem esperar a próxima publicação.
+ */
+function StoreShareMeta() {
+  const data = useQuery(api.settings.getShareMeta) as
+    | { meta: ShareMeta; tags: ShareMetaTag[] }
+    | undefined;
+
+  useEffect(() => {
+    if (!data) return;
+    applyShareMeta(data.meta, data.tags);
+  }, [data]);
+
+  return null;
+}
+
+/**
  * Diz se o deployment conectado realmente serve esta loja, observando uma query
  * pública conhecida: `settings.getStore` sempre devolve um objeto no backend
  * certo, e `localQueryResult()` lança quando o servidor responde erro. É o que
@@ -395,6 +418,7 @@ createRoot(document.getElementById("root")!).render(
             <BrowserRouter>
               <RouteSyncer />
               <StoreFavicon />
+              <StoreShareMeta />
               <Suspense fallback={<RouteLoading />}>
                 <Routes>
                   {/* Loja pública */}

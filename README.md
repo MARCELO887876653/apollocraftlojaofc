@@ -35,7 +35,7 @@ Plataforma completa de e-commerce digital (estilo Central Cart) construída com 
 | Integrações | Mercado Pago (credenciais) e despacho de comandos Minecraft |
 | Equipe | RBAC com papéis (owner/admin/gerente/suporte) e permissões granulares |
 | Auditoria | Log de todas as ações da equipe |
-| Configurações | Identidade, logo/favicon, redes sociais, campos do checkout, SEO, **modo manutenção** |
+| Configurações | Identidade, logo/favicon, redes sociais, campos do checkout, **bio do link** (título, descrição, imagem/GIF da prévia no Discord/WhatsApp) e **modo manutenção** |
 
 ### Segurança
 - **Nunca confiamos no navegador**: preços, descontos e cupons recalculados no servidor no checkout

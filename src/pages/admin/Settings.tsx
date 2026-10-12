@@ -8,9 +8,39 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ImageUpload } from "@/components/admin/ImageUpload";
 import { LinkPreviewCard } from "@/components/admin/LinkPreviewCard";
+import { PublishedShareStatus } from "@/components/admin/PublishedShareStatus";
 import { buildShareMeta } from "@/convex/lib/seo";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, Trash2 } from "lucide-react";
+
+/**
+ * Tamanho real da imagem da capa, para avisar quando ela é pequena/quadrada —
+ * o Discord mostra a imagem de ponta a ponta apenas com capas largas.
+ */
+function useImageSize(url?: string) {
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    if (!url) {
+      setSize(null);
+      return;
+    }
+    let alive = true;
+    const image = new Image();
+    image.onload = () => {
+      if (alive) setSize({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      if (alive) setSize(null);
+    };
+    image.src = url;
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+
+  return size;
+}
 
 type Store = {
   name: string; description: string; logoUrl: string; faviconUrl: string;
@@ -66,6 +96,25 @@ export default function AdminSettings() {
       ),
     [form],
   );
+
+  // Bio que está SALVA no servidor (não a do formulário): é o que o build vai
+  // gravar no HTML publicado, então é com ela que a verificação compara.
+  const savedMeta = useMemo(
+    () =>
+      buildShareMeta(
+        store
+          ? {
+              name: store.name,
+              description: store.description,
+              logoUrl: store.logoUrl,
+              seo: store.seo,
+            }
+          : null,
+      ),
+    [store],
+  );
+
+  const coverSize = useImageSize(form?.seo.ogImage);
 
   if (!form) return <Loader2 className="mx-auto size-5 animate-spin" />;
 
@@ -333,11 +382,20 @@ export default function AdminSettings() {
               Capa ideal: 1200×630 (JPG/PNG) ou um GIF curto de até 8 MB. A prévia acima usa o que
               está no formulário — clique em <strong>Salvar tudo</strong> para gravar.
             </p>
-            <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
-              Discord e WhatsApp leem a bio do <strong>site publicado</strong> (os robôs deles não
-              rodam o site), então depois de salvar <strong>publique a loja</strong> para o card
-              mudar. O aplicativo costuma guardar a última prévia em cache por algumas horas.
-            </p>
+            {coverSize && (coverSize.width < 600 || coverSize.width / coverSize.height < 1.4) && (
+              <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-400" />
+                <span>
+                  A capa enviada tem {" "}
+                  <strong>
+                    {coverSize.width}×{coverSize.height}
+                  </strong>
+                  . O Discord mostra a imagem de ponta a ponta quando a capa é larga (≈1200×630);
+                  quadrada ou pequena costuma virar só uma miniatura ao lado do texto.
+                </span>
+              </p>
+            )}
+            <PublishedShareStatus meta={savedMeta} />
           </div>
         </CardContent>
       </Card>

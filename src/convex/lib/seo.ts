@@ -4,7 +4,7 @@
  *
  * Importante: os robôs desses serviços NÃO executam JavaScript. Por isso os
  * mesmos valores resolvidos aqui são usados em dois lugares:
- *   1. gravados no HTML publicado pelo `scripts/inject-seo-tags.mjs`
+ *   1. gravados no HTML publicado pelo plugin `seoShareMetaPlugin` (vite.config.ts)
  *      (o que o Discord/WhatsApp realmente leem);
  *   2. aplicados no <head> em tempo de execução pelo app (título da aba e
  *      navegadores).

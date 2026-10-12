@@ -257,8 +257,9 @@ function StoreFavicon() {
  * Aplica a "bio do link" (título, descrição, imagem/GIF) no <head> da página.
  *
  * O que o Discord/WhatsApp mostram vem do HTML publicado — os robôs deles não
- * rodam JavaScript (ver `scripts/inject-seo-tags.mjs`, que grava as MESMAS tags
- * no build). Aqui a loja passa a refletir a bio editada no painel na hora, no
+ * rodam JavaScript (ver o plugin `seoShareMetaPlugin` no vite.config.ts, que
+ * grava as MESMAS tags no build). Aqui a loja passa a refletir a bio editada no
+ * painel na hora, no
  * navegador, sem esperar a próxima publicação.
  */
 function StoreShareMeta() {

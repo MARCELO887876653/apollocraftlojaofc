@@ -30,7 +30,8 @@ const IMAGE_TAGS = [
  * Aplica no <head> a bio do link vinda do servidor(`settings.getShareMeta`).
  *
  * Os robôs do Discord/WhatsApp não rodam JavaScript — o que eles leem é o HTML
- * publicado, gravado pelo `scripts/inject-seo-tags.mjs`. Aqui o alvo é o
+ * publicado, gravado no build pelo plugin `seoShareMetaPlugin` (vite.config.ts).
+ * Aqui o alvo é o
  * navegador: título da aba e, para qualquer consumidor que leia o DOM, a mesma
  * bio sem esperar a próxima publicação.
  */

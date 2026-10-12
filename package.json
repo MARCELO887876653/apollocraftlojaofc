@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "node scripts/convex-codegen-if-needed.mjs && node scripts/inject-seo-tags.mjs",
+    "prebuild": "node scripts/convex-codegen-if-needed.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",

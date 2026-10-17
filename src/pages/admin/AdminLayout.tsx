@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { api } from "@/convex/_generated/api";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Button } from "@/components/ui/button";
+import { DiscordIcon } from "@/components/icons/DiscordIcon";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -16,7 +17,7 @@ import {
 type NavItem = {
   to: string;
   label: string;
-  icon: typeof Package;
+  icon: ComponentType<{ className?: string; strokeWidth?: number }>;
   perm: string;
   end?: boolean;
   badge?: "novo" | "beta";
@@ -37,6 +38,7 @@ const NAV: NavItem[] = [
   { to: "/painel/conteudo", label: "Postagens", icon: FileText, perm: "content.manage", more: true },
   { to: "/painel/clientes", label: "Clientes", icon: Users, perm: "customers.view", more: true },
   { to: "/painel/equipe", label: "Membros", icon: UserPlus, perm: "team.manage", more: true },
+  { to: "/painel/discord", label: "Discord", icon: DiscordIcon, perm: "settings.manage", more: true, badge: "novo" },
   { to: "/painel/integracoes", label: "Integrações", icon: Plug, perm: "integrations.manage", more: true },
   { to: "/painel/aparencia", label: "Aparência", icon: Palette, perm: "appearance.manage", more: true },
   { to: "/painel/logs", label: "Auditoria", icon: ScrollText, perm: "logs.view", more: true },

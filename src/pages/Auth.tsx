@@ -17,6 +17,8 @@ import {
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
+import { DiscordIcon } from "@/components/icons/DiscordIcon";
+import { createDiscordAttempt, saveDiscordAttempt } from "@/lib/discord-auth";
 import logoMark from "@/assets/logo.svg";
 import {
   ArrowLeft,
@@ -55,6 +57,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   // Logo enviado pela loja (Configurações → Loja). Enquanto ele não chega,
   // mostramos a marca Apollo embutida no projeto.
   const store = useQuery(api.settings.getStore) as StoreBrand | undefined;
+  // O botão do Discord só aparece quando o dono da loja liga a integração
+  // (Painel → Discord). `clientId` é público: vai na URL de autorização.
+  const discord = useQuery(api.discordAuth.getPublicConfig) as
+    | { enabled: boolean; clientId: string | null }
+    | undefined;
+  const [discordLoading, setDiscordLoading] = useState(false);
   const storeName = store?.name ?? "Apollo Craft";
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -145,6 +153,29 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   };
 
+  const handleDiscordLogin = async () => {
+    if (!discord?.clientId) return;
+    setIsLoading(true);
+    setDiscordLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { url, attempt } = await createDiscordAttempt({
+        clientId: discord.clientId,
+        origin: window.location.origin,
+        returnTo: redirect,
+      });
+      // O `state`/PKCE ficam na sessão do navegador até a volta do Discord.
+      saveDiscordAttempt(sessionStorage, attempt);
+      window.location.assign(url);
+    } catch (cause) {
+      console.error("Discord sign-in error:", cause);
+      setError("Não foi possível iniciar o login com Discord. Tente novamente.");
+      setIsLoading(false);
+      setDiscordLoading(false);
+    }
+  };
+
   const handleGuestLogin = async () => {
     setIsLoading(true);
     setError(null);
@@ -218,8 +249,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     Acessar a {storeName}
                   </CardTitle>
                   <CardDescription className="text-pretty">
-                    Informe seu e-mail para receber um código de acesso. Sem senha,
-                    rápido e seguro.
+                    {discord?.enabled
+                      ? "Entre com o Discord em um toque ou receba um código de acesso no seu e-mail."
+                      : "Informe seu e-mail para receber um código de acesso. Sem senha, rápido e seguro."}
                   </CardDescription>
                 </div>
               </CardHeader>
@@ -271,6 +303,24 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       </span>
                     </div>
                   </div>
+
+                  {discord?.enabled && discord.clientId && (
+                    <Button
+                      type="button"
+                      size="lg"
+                      variant="outline"
+                      className="w-full border-[#5865F2]/40 bg-[#5865F2]/10 font-semibold text-foreground hover:bg-[#5865F2]/20 hover:text-foreground"
+                      onClick={() => void handleDiscordLogin()}
+                      disabled={isLoading}
+                    >
+                      {discordLoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <DiscordIcon className="mr-2 h-4 w-4 text-[#5865F2]" />
+                      )}
+                      Entrar com Discord
+                    </Button>
+                  )}
 
                   <Button
                     type="button"

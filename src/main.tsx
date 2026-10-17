@@ -45,6 +45,8 @@ if (import.meta.env.DEV) {
 
 // Lazy load route components for better code splitting
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
+// Volta do OAuth do Discord (/auth/discord): troca o código pelo login.
+const DiscordCallbackPage = lazy(() => import("./pages/DiscordCallback.tsx"));
 const CategoriesPage = lazy(() => import("./pages/Categories.tsx"));
 const CategoryPage = lazy(() => import("./pages/CategoryPage.tsx"));
 const ProductPage = lazy(() => import("./pages/Product.tsx"));
@@ -70,6 +72,7 @@ const AdminApiLogs = lazy(() => import("./pages/admin/ApiLogs.tsx"));
 const AdminContent = lazy(() => import("./pages/admin/Content.tsx"));
 const AdminAppearance = lazy(() => import("./pages/admin/Appearance.tsx"));
 const AdminIntegrations = lazy(() => import("./pages/admin/Integrations.tsx"));
+const AdminDiscord = lazy(() => import("./pages/admin/Discord.tsx"));
 const AdminTeam = lazy(() => import("./pages/admin/Team.tsx"));
 const AdminLogs = lazy(() => import("./pages/admin/Logs.tsx"));
 const AdminSettings = lazy(() => import("./pages/admin/Settings.tsx"));
@@ -452,6 +455,9 @@ createRoot(document.getElementById("root")!).render(
                     path="/auth"
                     element={<AuthPage redirectAfterAuth="/painel" />}
                   />
+                  {/* Endereço de retorno registrado no Discord Developer Portal.
+                      Precisa ser exatamente este caminho (ver /painel/discord). */}
+                  <Route path="/auth/discord" element={<DiscordCallbackPage />} />
 
                   {/* Painel admin */}
                   <Route
@@ -477,6 +483,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route path="conteudo" element={<AdminContent />} />
                     <Route path="aparencia" element={<AdminAppearance />} />
                     <Route path="integracoes" element={<AdminIntegrations />} />
+                    <Route path="discord" element={<AdminDiscord />} />
                     <Route path="equipe" element={<AdminTeam />} />
                     <Route path="logs" element={<AdminLogs />} />
                     <Route path="configuracoes" element={<AdminSettings />} />

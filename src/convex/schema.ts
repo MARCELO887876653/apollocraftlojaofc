@@ -71,6 +71,8 @@ const schema = defineSchema(
     users: defineTable({
       name: v.optional(v.string()),
       image: v.optional(v.string()),
+      // Id do arquivo da foto no storage (permite apagar a anterior ao trocar).
+      avatarStorageId: v.optional(v.id("_storage")),
       email: v.optional(v.string()),
       emailVerificationTime: v.optional(v.number()),
       isAnonymous: v.optional(v.boolean()),

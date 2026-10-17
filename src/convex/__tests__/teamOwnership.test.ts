@@ -3,6 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
 import schema from "../schema";
 import { api } from "../_generated/api";
+import type { Id } from "../_generated/dataModel";
 
 const modules = import.meta.glob(["../**/*.ts", "!../**/*.test.ts"]);
 
@@ -50,7 +51,9 @@ describe(MODULE_DESCRIPTION, () => {
         role: "owner",
       });
 
-    const created = await t.run(async (ctx) => ctx.db.get(newId));
+    // `team.upsert` devolve um id de adminUsers; sem a anotação o `db.get`
+    // aceita qualquer tabela e o resultado vem como união de todos os docs.
+    const created = await t.run(async (ctx) => ctx.db.get(newId as Id<"adminUsers">));
     expect(created?.role).toBe("owner");
     // Dono recebe todas as permissões automaticamente.
     expect(created?.permissions.length).toBeGreaterThan(0);

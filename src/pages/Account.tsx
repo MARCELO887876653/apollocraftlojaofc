@@ -1,11 +1,13 @@
 import { useMutation, useQuery } from "convex/react";
 import { Link, useNavigate } from "react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/convex/_generated/api";
+import { AVATAR_MAX_MB } from "@/convex/lib/discord";
 import { useAuth } from "@/hooks/use-auth";
 import { StoreLayout } from "@/components/store/StoreLayout";
 import { DeliveriesList } from "@/components/store/DeliveriesList";
+import { DiscordIcon } from "@/components/icons/DiscordIcon";
 import { formatBRL, formatDate, PAYMENT_STATUS_LABEL, DELIVERY_STATUS_LABEL } from "@/lib/format";
 import { PAYMENT_STATUS_COLOR, DELIVERY_STATUS_COLOR } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -16,7 +18,7 @@ import { cn } from "@/lib/utils";
 import {
   Loader2, Package, Clock, CheckCircle2, XCircle, User, ShoppingBag,
   LogOut, RefreshCcw, Pencil, Check, X, ShieldCheck, Settings2, Calendar,
-  Sparkles, TriangleAlert, UserRound,
+  Sparkles, TriangleAlert, UserRound, Camera, ImagePlus,
 } from "lucide-react";
 
 type Order = {
@@ -38,6 +40,7 @@ type AccountUser = {
   _creationTime?: number;
   name?: string;
   email?: string;
+  image?: string;
   isAnonymous?: boolean;
 };
 
@@ -127,12 +130,17 @@ export default function AccountPage() {
   const navigate = useNavigate();
   const orders = useQuery(api.orders.myOrders) as Order[] | null | undefined;
   const me = useQuery(api.team.me) as { admin: { role: string; name: string } | null } | null | undefined;
+  const providers = useQuery(api.profile.myProviders) as string[] | undefined;
   const updateProfile = useMutation(api.profile.updateProfile);
+  const avatarUploadUrl = useMutation(api.profile.avatarUploadUrl);
+  const setAvatar = useMutation(api.profile.setAvatar);
 
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<"signOut" | "switch" | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const avatarInput = useRef<HTMLInputElement>(null);
 
   if (isLoading) {
     return (
@@ -194,6 +202,46 @@ export default function AccountPage() {
     }
   };
 
+  const uploadAvatar = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Escolha uma imagem (JPG, PNG, WEBP ou GIF).");
+      return;
+    }
+    if (file.size > AVATAR_MAX_MB * 1024 * 1024) {
+      toast.error(`A foto deve ter no máximo ${AVATAR_MAX_MB} MB.`);
+      return;
+    }
+    setAvatarBusy(true);
+    try {
+      const postUrl = await avatarUploadUrl();
+      const res = await fetch(postUrl, {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!res.ok) throw new Error("Falha no envio da foto.");
+      const { storageId } = (await res.json()) as { storageId: string };
+      await setAvatar({ storageId: storageId as never });
+      toast.success("Foto atualizada!");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Não foi possível salvar a foto.");
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const removeAvatar = async () => {
+    setAvatarBusy(true);
+    try {
+      await updateProfile({ image: null });
+      toast.success("Foto removida.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Não foi possível remover a foto.");
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
   const handleSignOut = async () => {
     setBusy("signOut");
     try {
@@ -225,9 +273,44 @@ export default function AccountPage() {
         <div className="relative overflow-hidden rounded-3xl border bg-card">
           <div className="pointer-events-none absolute -right-16 -top-20 size-56 rounded-full bg-primary/15 blur-3xl" aria-hidden />
           <div className="relative flex flex-wrap items-center gap-4 p-5 sm:p-6">
-            <span className="neon-glow flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-sky-600 text-2xl font-extrabold text-sky-950 shadow-lg shadow-sky-500/25">
-              {displayName.slice(0, 1).toUpperCase()}
-            </span>
+            <input
+              ref={avatarInput}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadAvatar(file);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => avatarInput.current?.click()}
+              disabled={avatarBusy}
+              aria-label={u.image ? "Trocar minha foto" : "Adicionar minha foto"}
+              title={u.image ? "Trocar minha foto" : "Adicionar minha foto"}
+              className="group relative shrink-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            >
+              {u.image ? (
+                <img
+                  src={u.image}
+                  alt={displayName}
+                  className="size-16 rounded-2xl object-cover shadow-lg shadow-sky-500/20 ring-1 ring-sky-500/30"
+                />
+              ) : (
+                <span className="neon-glow flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-sky-600 text-2xl font-extrabold text-sky-950 shadow-lg shadow-sky-500/25">
+                  {displayName.slice(0, 1).toUpperCase()}
+                </span>
+              )}
+              <span className="absolute -bottom-1 -right-1 flex size-6 items-center justify-center rounded-full bg-foreground text-background ring-2 ring-background transition-transform group-hover:scale-110">
+                {avatarBusy ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Camera className="size-3" />
+                )}
+              </span>
+            </button>
             <div className="min-w-0 flex-1">
               {editing ? (
                 <div className="flex flex-wrap items-center gap-2">
@@ -273,11 +356,25 @@ export default function AccountPage() {
                   <Badge variant="outline" className="border-emerald-500/40 text-emerald-500">
                     <ShieldCheck className="mr-1 size-3" /> E-mail verificado
                   </Badge>
-                )}
-                {role && (
+                )}                {role && (
                   <Badge variant="outline" className="border-sky-500/40 capitalize text-sky-400">
                     <Sparkles className="mr-1 size-3" /> Equipe · {role}
                   </Badge>
+                )}
+                {providers?.includes("discord") && (
+                  <Badge variant="outline" className="border-[#5865F2]/50 text-[#5865F2]">
+                    <DiscordIcon className="mr-1 size-3" /> Discord conectado
+                  </Badge>
+                )}
+                {u.image && (
+                  <button
+                    type="button"
+                    onClick={() => void removeAvatar()}
+                    disabled={avatarBusy}
+                    className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    Remover foto
+                  </button>
                 )}
                 {u._creationTime && (
                   <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -301,11 +398,18 @@ export default function AccountPage() {
             to="/loja"
           />
           <ActionCard
+            icon={ImagePlus}
+            title={u.image ? "Trocar minha foto" : "Adicionar uma foto"}
+            description={`JPG, PNG ou GIF até ${AVATAR_MAX_MB} MB`}
+            onClick={() => avatarInput.current?.click()}
+            tone="primary"
+            loading={avatarBusy}
+          />
+          <ActionCard
             icon={Pencil}
             title="Editar meu nome"
             description="Como você aparece na loja"
             onClick={startEditing}
-            tone="primary"
           />
           {role && (
             <ActionCard

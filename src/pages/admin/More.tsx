@@ -1,18 +1,20 @@
+import { type ComponentType } from "react";
 import { NavLink } from "react-router";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { formatBRL } from "@/lib/format";
+import { DiscordIcon } from "@/components/icons/DiscordIcon";
 import { cn } from "@/lib/utils";
 import {
   Package, FolderTree, Ticket, Megaphone, FileText, Users, Truck, Palette,
   Settings, Plug, ScrollText, UserPlus, ChevronRight, Store, ExternalLink,
-  Gem, type LucideIcon,
+  Gem,
 } from "lucide-react";
 
 type NavItem = {
   to: string;
   label: string;
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string; strokeWidth?: number }>;
   perm: string;
   badge?: "novo" | "beta";
 };
@@ -39,6 +41,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
     title: "Gestão",
     items: [
       { to: "/painel/equipe", label: "Membros", icon: UserPlus, perm: "team.manage" },
+      { to: "/painel/discord", label: "Discord", icon: DiscordIcon, perm: "settings.manage", badge: "novo" },
       { to: "/painel/integracoes", label: "Integrações", icon: Plug, perm: "integrations.manage" },
       { to: "/painel/aparencia", label: "Aparência", icon: Palette, perm: "appearance.manage" },
       { to: "/painel/logs", label: "Auditoria", icon: ScrollText, perm: "logs.view" },

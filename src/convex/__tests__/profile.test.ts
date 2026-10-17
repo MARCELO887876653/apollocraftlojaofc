@@ -80,24 +80,33 @@ describe("perfil — foto", () => {
     const t = convexTest(schema, modules);
     const userId = await seedUser(t);
 
+    // Recusa devolvendo erro (não lançando) — uma mutation que lança desfaz a
+    // exclusão do arquivo recusado, que ficaria para sempre no storage.
     const notImage = await storeFile(t, { type: "application/pdf", bytes: 10 });
-    await expect(
-      asUser(t, userId).mutation(api.profile.setAvatar, { storageId: notImage }),
-    ).rejects.toThrow(/imagem/i);
+    const rejected = await asUser(t, userId).mutation(api.profile.setAvatar, {
+      storageId: notImage,
+    });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.error).toMatch(/imagem/i);
     // O arquivo inválido não fica ocupando espaço no storage.
     expect(await t.run(async (ctx) => ctx.db.system.get(notImage))).toBeNull();
 
     const tooBig = await storeFile(t, { type: "image/png", bytes: 6 * 1024 * 1024 });
-    await expect(
-      asUser(t, userId).mutation(api.profile.setAvatar, { storageId: tooBig }),
-    ).rejects.toThrow(/5 MB/);
+    const oversized = await asUser(t, userId).mutation(api.profile.setAvatar, {
+      storageId: tooBig,
+    });
+    expect(oversized.ok).toBe(false);
+    expect(oversized.error).toMatch(/5 MB/);
+    expect(await t.run(async (ctx) => ctx.db.system.get(tooBig))).toBeNull();
 
     const ok = await storeFile(t, { type: "image/png", bytes: 1024 });
     const saved = await asUser(t, userId).mutation(api.profile.setAvatar, { storageId: ok });
-    expect(saved.url).toContain("/api/storage/");
+    expect(saved.ok).toBe(true);
+    const url = saved.ok ? saved.url : "";
+    expect(url).toContain("/api/storage/");
 
     const user = await t.run(async (ctx) => ctx.db.get(userId));
-    expect(user?.image).toBe(saved.url);
+    expect(user?.image).toBe(url);
   });
 
   test("trocar de foto apaga a anterior do storage", async () => {
@@ -108,11 +117,12 @@ describe("perfil — foto", () => {
 
     const second = await storeFile(t, { type: "image/jpeg", bytes: 512 });
     const saved = await asUser(t, userId).mutation(api.profile.setAvatar, { storageId: second });
+    expect(saved.ok).toBe(true);
 
     expect(await t.run(async (ctx) => ctx.db.system.get(first))).toBeNull();
     expect(await t.run(async (ctx) => ctx.db.system.get(second))).not.toBeNull();
     const user = await t.run(async (ctx) => ctx.db.get(userId));
-    expect(user?.image).toBe(saved.url);
+    expect(user?.image).toBe(saved.ok ? saved.url : undefined);
   });
 
   test("remover a foto (image: null) limpa o campo e o arquivo", async () => {

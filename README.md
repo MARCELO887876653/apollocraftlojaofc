@@ -35,6 +35,7 @@ Plataforma completa de e-commerce digital (estilo Central Cart) construída com 
 | Integrações | Mercado Pago (credenciais) e despacho de comandos Minecraft |
 | Equipe | RBAC com papéis (owner/admin/gerente/suporte) e permissões granulares |
 | Auditoria | Log de todas as ações da equipe |
+| Discord | **Login com Discord** (Client ID/Secret do seu aplicativo, endereços de retorno prontos para copiar, testar credenciais e ligar/desligar o botão na tela de login) |
 | Configurações | Identidade, logo/favicon, redes sociais, campos do checkout, **bio do link** (título, descrição, imagem/GIF da prévia no Discord/WhatsApp) e **modo manutenção** |
 
 ### Segurança
@@ -62,6 +63,15 @@ Plataforma completa de e-commerce digital (estilo Central Cart) construída com 
    ```
    (evento `payment`) — a confirmação automática também funciona por polling mesmo sem webhook
 4. Alternativa por ambiente: defina `MERCADO_PAGO_ACCESS_TOKEN` nas variáveis do Convex
+
+## Login com Discord (Minha Conta com foto)
+
+1. Em [discord.com/developers/applications](https://discord.com/developers/applications) crie um aplicativo (**New Application**)
+2. Em **OAuth2 → Redirects**, adicione o endereço mostrado em *Painel → Discord* (ex.: `https://sualoja.com/auth/discord`)
+3. Copie o **Client ID** e o **Client Secret** (OAuth2 → General) e cole em *Painel → Discord*, ligando o interruptor
+4. Clique em **Testar credenciais** para confirmar com o próprio Discord — o segredo fica só no servidor
+
+Com isso o botão **Entrar com Discord** aparece na tela de login (fluxo com PKCE + `state`). Quem entra pelo Discord tem nome e foto preenchidos automaticamente; se o e-mail for de um cliente que já comprou, a conta é **vinculada** em vez de duplicada. Em **Minha Conta** o cliente pode enviar, trocar ou remover a própria foto (JPG/PNG/WEBP/GIF até 5 MB) e vê o selo *Discord conectado*.
 
 ## Desenvolvimento
 

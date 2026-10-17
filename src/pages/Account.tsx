@@ -221,7 +221,8 @@ export default function AccountPage() {
       });
       if (!res.ok) throw new Error("Falha no envio da foto.");
       const { storageId } = (await res.json()) as { storageId: string };
-      await setAvatar({ storageId: storageId as never });
+      const saved = await setAvatar({ storageId: storageId as never });
+      if (!saved.ok) throw new Error(saved.error);
       toast.success("Foto atualizada!");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Não foi possível salvar a foto.");
@@ -356,7 +357,8 @@ export default function AccountPage() {
                   <Badge variant="outline" className="border-emerald-500/40 text-emerald-500">
                     <ShieldCheck className="mr-1 size-3" /> E-mail verificado
                   </Badge>
-                )}                {role && (
+                )}
+                {role && (
                   <Badge variant="outline" className="border-sky-500/40 capitalize text-sky-400">
                     <Sparkles className="mr-1 size-3" /> Equipe · {role}
                   </Badge>

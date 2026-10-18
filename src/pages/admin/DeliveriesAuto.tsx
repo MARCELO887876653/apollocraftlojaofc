@@ -10,8 +10,13 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Loader2, RefreshCw, Ban, RotateCcw, Server, Zap } from "lucide-react";
-import { formatDate, formatRelative } from "@/lib/format";
+import { Loader2, RefreshCw, Ban, RotateCcw, Server, Zap, ScrollText } from "lucide-react";
+import {
+  formatDate,
+  formatRelative,
+  DELIVERY_EVENT_LABEL,
+  DELIVERY_EVENT_COLOR,
+} from "@/lib/format";
 
 type Command = {
   _id: string; id: string; orderId: string; orderNumber: string; productName: string;
@@ -19,6 +24,13 @@ type Command = {
   payload: unknown; offlineExecute: boolean; status: string; attempts: number; maxAttempts: number;
   response: string; reason: string; executeAt: number; createdAt: number;
   completedAt?: number; lastAttemptAt?: number;
+  errorCode?: string; resendCount?: number; resentBy?: string; resentAt?: number | null;
+};
+
+// Linha do log completo (deliveryEvents) de uma entrega.
+type CommandEvent = {
+  _id: string; deliveryId: string; publicId: string; type: string; status: string;
+  message: string; actor: string; actorName: string; createdAt: number;
 };
 
 type ServerInfo = {
@@ -90,7 +102,7 @@ export default function AdminDeliveriesAuto() {
   const detail = useQuery(
     api.deliveryCommands.adminGet,
     openId ? { id: openId as any } : "skip",
-  ) as { command: Command; attempts: any[] } | undefined;
+  ) as { command: Command; attempts: any[]; events: CommandEvent[] } | undefined;
 
   if (all === undefined) {
     return <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>;
@@ -179,8 +191,18 @@ export default function AdminDeliveriesAuto() {
                 </p>
               </div>
               <Badge className={STATUS_CLASS[c.status] ?? ""}>{STATUS_LABEL[c.status] ?? c.status}</Badge>
+              {c.status === "PENDING" && c.errorCode === "PLAYER_OFFLINE" && (
+                <Badge variant="outline" className="text-[10px] text-amber-600 dark:text-amber-400">
+                  aguardando jogador
+                </Badge>
+              )}
               {c.status === "PENDING" && c.executeAt > now && (
                 <Badge variant="outline" className="text-[10px]">agendada {formatRelative(c.executeAt)}</Badge>
+              )}
+              {Boolean(c.resendCount) && (
+                <Badge variant="outline" className="text-[10px] text-sky-500">
+                  {c.resendCount}× reenviada
+                </Badge>
               )}
               <span className="text-xs text-muted-foreground">{c.attempts}/{c.maxAttempts} tent.</span>
             </button>
@@ -202,9 +224,17 @@ export default function AdminDeliveriesAuto() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <Field label="Status">
-                  <Badge className={STATUS_CLASS[detail.command.status] ?? ""}>
-                    {STATUS_LABEL[detail.command.status] ?? detail.command.status}
-                  </Badge>
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <Badge className={STATUS_CLASS[detail.command.status] ?? ""}>
+                      {STATUS_LABEL[detail.command.status] ?? detail.command.status}
+                    </Badge>
+                    {detail.command.status === "PENDING" &&
+                      detail.command.errorCode === "PLAYER_OFFLINE" && (
+                        <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-400">
+                          aguardando o jogador entrar
+                        </Badge>
+                      )}
+                  </span>
                 </Field>
                 <Field label="Pedido">{detail.command.orderNumber}</Field>
                 <Field label="Produto">{detail.command.productName}</Field>
@@ -239,6 +269,13 @@ export default function AdminDeliveriesAuto() {
                 <Field label="Resposta do addon">{detail.command.response}</Field>
               )}
               {detail.command.reason && <Field label="Motivo">{detail.command.reason}</Field>}
+              {Boolean(detail.command.resendCount) && (
+                <Field label="Reenvios pelo painel">
+                  {detail.command.resendCount}×{" "}
+                  {detail.command.resentBy ? `por ${detail.command.resentBy}` : ""}
+                  {detail.command.resentAt ? ` · último em ${formatDate(detail.command.resentAt)}` : ""}
+                </Field>
+              )}
 
               <div className="flex flex-wrap gap-2">
                 {detail.command.status === "FAILED" && (
@@ -294,10 +331,44 @@ export default function AdminDeliveriesAuto() {
 
               <Separator />
               <div>
-                <p className="mb-2 text-sm font-semibold">Histórico de tentativas</p>
-                {detail.attempts.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Nenhuma tentativa registrada.</p>
+                <p className="mb-2 text-sm font-semibold">
+                  Log completo ({detail.events?.length ?? 0})
+                </p>
+                {!detail.events || detail.events.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Sem eventos registrados. Entregas criadas antes do log completo
+                    existir aparecem apenas no histórico de tentativas abaixo.
+                  </p>
                 ) : (
+                  <ol className="space-y-2">
+                    {detail.events.map((e) => (
+                      <li key={e._id} className="flex gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-xs">
+                        <ScrollText
+                          className={`mt-0.5 size-3.5 shrink-0 ${
+                            DELIVERY_EVENT_COLOR[e.type] ?? "text-muted-foreground"
+                          }`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center justify-between gap-1">
+                            <span className={`font-semibold ${DELIVERY_EVENT_COLOR[e.type] ?? ""}`}>
+                              {DELIVERY_EVENT_LABEL[e.type] ?? e.type}
+                            </span>
+                            <span className="text-muted-foreground">{formatDate(e.createdAt)}</span>
+                          </div>
+                          {e.message && <p className="mt-0.5 break-words text-muted-foreground">{e.message}</p>}
+                          {e.actorName && (
+                            <p className="mt-0.5 text-muted-foreground">por {e.actorName}</p>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+
+              {detail.attempts.length > 0 && (
+                <div>
+                  <p className="mb-2 text-sm font-semibold">Tentativas (claims)</p>
                   <div className="space-y-1.5">
                     {detail.attempts.map((a: any) => (
                       <div key={a._id} className="rounded-lg border bg-muted/20 px-3 py-2 text-xs">
@@ -313,8 +384,8 @@ export default function AdminDeliveriesAuto() {
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

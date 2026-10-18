@@ -2,6 +2,12 @@ import { query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin } from "./lib/admin";
 import { generateClaimToken } from "./lib/hash";
+import {
+  DELIVERY_EVENT,
+  logDeliveryEvent,
+  resendInfo,
+  deliveryConsoleLine,
+} from "./lib/deliveryLog";
 
 // ─────────────────────────────────────────────────────────────
 // Dados da API v1: rate limit, claim/lease, confirmação, heartbeat, logs.
@@ -218,6 +224,21 @@ export const internalClaim = internalMutation({
             claimToken: undefined,
             updatedAt: now,
           });
+          // O addon pegou e sumiu (caiu/reiniciou): a entrega volta para a
+          // fila e isso fica registrado no log completo.
+          await logDeliveryEvent(ctx, {
+            deliveryId: p._id,
+            publicId: p.publicId,
+            orderId: p.orderId,
+            orderNumber: p.orderNumber,
+            type: DELIVERY_EVENT.claimExpired,
+            status: "PENDING",
+            message: `Claim expirou (addon não confirmou) — voltou para a fila (tentativa ${p.attempts}/${p.maxAttempts})`,
+            actor: "SYSTEM",
+            serverId: p.serverId,
+            addonId: p.addonId,
+            details: { attempts: p.attempts, claimExpiresAt: p.claimExpiresAt },
+          });
         }
       }
     }
@@ -272,6 +293,31 @@ export const internalClaim = internalMutation({
         startedAt: now,
         createdAt: now,
       });
+      // Log completo: quem pegou, quando, com que tentativa e se era reenvio.
+      await logDeliveryEvent(ctx, {
+        deliveryId: c._id,
+        publicId: c.publicId,
+        orderId: c.orderId,
+        orderNumber: c.orderNumber,
+        type: DELIVERY_EVENT.claimed,
+        status: "PROCESSING",
+        message: `Pega pelo addon · tentativa ${c.attempts + 1}/${c.maxAttempts}${
+          c.resendCount ? ` · REENVIO #${c.resendCount}${c.resentBy ? ` (${c.resentBy})` : ""}` : ""
+        }`,
+        actor: "ADDON",
+        actorName: addonId ?? serverId,
+        serverId,
+        addonId: addonId ?? c.addonId,
+        apiKeyId,
+        details: {
+          attempt: c.attempts + 1,
+          maxAttempts: c.maxAttempts,
+          leaseMs: lease,
+          claimToken,
+          resendCount: c.resendCount ?? 0,
+          resentBy: c.resentBy ?? null,
+        },
+      });
       claimed.push({
         id: c.publicId,
         server_id: c.serverId,
@@ -294,6 +340,10 @@ export const internalClaim = internalMutation({
         claimed_at: new Date(now).toISOString(),
         claimed_by: apiKeyId,
         claim_expires_at: new Date(now + lease).toISOString(),
+        // Reenvio pelo painel (null quando nunca foi reenviada) e a linha
+        // pronta para imprimir no console do servidor.
+        resent: resendInfo(c),
+        console_log: deliveryConsoleLine(c, c.attempts + 1),
         order: {
           id: c.orderNumber,
           client_identifier: c.clientIdentifier,
@@ -368,10 +418,33 @@ export const internalConfirm = internalMutation({
     };
 
     if (status === "DONE") {
-      if (c.status === "DONE") return { ok: true as const, status: "DONE" as const, idempotent: true };
+      if (c.status === "DONE") {
+        await logDeliveryEvent(ctx, {
+          deliveryId: c._id,
+          publicId: c.publicId,
+          orderId: c.orderId,
+          orderNumber: c.orderNumber,
+          type: DELIVERY_EVENT.confirmed,
+          status: "DONE",
+          message: `Confirmação repetida pelo addon (ignorada: já estava concluída)${
+            response ? ` — ${response}` : ""
+          }`,
+          actor: "ADDON",
+          actorName: addonId ?? serverId,
+          serverId,
+          addonId: addonId ?? c.addonId,
+          apiKeyId,
+          details: { idempotent: true },
+        });
+        return { ok: true as const, status: "DONE" as const, idempotent: true };
+      }
+      // O addon pode confirmar sem mandar `response`. Antes a loja gravava
+      // "Entregue com sucesso" nesse caso (e o painel parecia ter prova de
+      // sucesso). Agora fica explícito que ele não detalhou nada.
+      const finalResponse = response?.trim() || "Sem resposta do addon (concluiu sem detalhar)";
       await ctx.db.patch(c._id, {
         status: "DONE",
-        response: response ?? "Entregue com sucesso",
+        response: finalResponse,
         completedAt: now,
         errorCode: undefined,
         lastError: undefined,
@@ -381,7 +454,30 @@ export const internalConfirm = internalMutation({
         ...clearClaim,
         updatedAt: now,
       });
-      await finishOpenAttempt(ctx, c._id, "DONE", response, reason);
+      await finishOpenAttempt(ctx, c._id, "DONE", finalResponse, reason);
+      await logDeliveryEvent(ctx, {
+        deliveryId: c._id,
+        publicId: c.publicId,
+        orderId: c.orderId,
+        orderNumber: c.orderNumber,
+        type: DELIVERY_EVENT.confirmed,
+        status: "DONE",
+        message: `Concluída pelo addon: ${finalResponse}${
+          c.resendCount ? ` · após ${c.resendCount} reenvio(s) pelo painel` : ""
+        }`,
+        actor: "ADDON",
+        actorName: addonId ?? serverId,
+        serverId,
+        addonId: addonId ?? c.addonId,
+        apiKeyId,
+        details: {
+          response: finalResponse,
+          addonSentResponse: Boolean(response?.trim()),
+          attempts: c.attempts,
+          maxAttempts: c.maxAttempts,
+          resendCount: c.resendCount ?? 0,
+        },
+      });
       return { ok: true as const, status: "DONE" as const };
     }
 
@@ -395,6 +491,20 @@ export const internalConfirm = internalMutation({
         updatedAt: now,
       });
       await finishOpenAttempt(ctx, c._id, "CANCELED", response, reason);
+      await logDeliveryEvent(ctx, {
+        deliveryId: c._id,
+        publicId: c.publicId,
+        orderId: c.orderId,
+        orderNumber: c.orderNumber,
+        type: DELIVERY_EVENT.canceled,
+        status: "CANCELED",
+        message: `Cancelada pelo addon${response ? `: ${response}` : ""}`,
+        actor: "ADDON",
+        actorName: addonId ?? serverId,
+        serverId,
+        addonId: addonId ?? c.addonId,
+        apiKeyId,
+      });
       return { ok: true as const, status: "CANCELED" as const };
     }
 
@@ -416,6 +526,27 @@ export const internalConfirm = internalMutation({
         updatedAt: now,
       });
       await finishOpenAttempt(ctx, c._id, "PENDING", response, reason);
+      await logDeliveryEvent(ctx, {
+        deliveryId: c._id,
+        publicId: c.publicId,
+        orderId: c.orderId,
+        orderNumber: c.orderNumber,
+        type: isOffline ? DELIVERY_EVENT.awaitingPlayer : DELIVERY_EVENT.claimed,
+        status: "PENDING",
+        message: isOffline
+          ? "Jogador offline — a entrega fica na fila esperando ele entrar (não consome tentativa)"
+          : `Devolvida para a fila pelo addon${response ? `: ${response}` : ""}`,
+        actor: "ADDON",
+        actorName: addonId ?? serverId,
+        serverId,
+        addonId: addonId ?? c.addonId,
+        apiKeyId,
+        details: {
+          playerOffline: isOffline,
+          attempts: isOffline ? Math.max(0, c.attempts - 1) : c.attempts,
+          errorCode: errorCode ?? (isOffline ? ERROR_CODES.PLAYER_OFFLINE : null),
+        },
+      });
       return { ok: true as const, status: "PENDING" as const, playerOffline: isOffline };
     }
 
@@ -442,6 +573,30 @@ export const internalConfirm = internalMutation({
         updatedAt: now,
       });
       await finishOpenAttempt(ctx, c._id, "FAILED", response, reason);
+      await logDeliveryEvent(ctx, {
+        deliveryId: c._id,
+        publicId: c.publicId,
+        orderId: c.orderId,
+        orderNumber: c.orderNumber,
+        type: DELIVERY_EVENT.failed,
+        status: "FAILED",
+        message: `Falha definitiva (${finalCode}): ${
+          response ?? reason ?? "sem detalhe do addon"
+        } — precisa de ação no painel`,
+        actor: "ADDON",
+        actorName: addonId ?? serverId,
+        serverId,
+        addonId: addonId ?? c.addonId,
+        apiKeyId,
+        details: {
+          errorCode: finalCode,
+          attempts,
+          maxAttempts: c.maxAttempts,
+          requiresManualIntervention: true,
+          response: response ?? null,
+          reason: reason ?? null,
+        },
+      });
       return { ok: true as const, status: "FAILED" as const, permanent: true, errorCode: finalCode };
     }
 
@@ -461,6 +616,30 @@ export const internalConfirm = internalMutation({
       updatedAt: now,
     });
     await finishOpenAttempt(ctx, c._id, "FAILED", response, reason);
+    await logDeliveryEvent(ctx, {
+      deliveryId: c._id,
+      publicId: c.publicId,
+      orderId: c.orderId,
+      orderNumber: c.orderNumber,
+      type: DELIVERY_EVENT.failed,
+      status: "FAILED",
+      message: `Falha temporária (${code ?? ERROR_CODES.TEMPORARY_STORAGE_ERROR}): ${
+        response ?? reason ?? "sem detalhe do addon"
+      } — nova tentativa em ${Math.round(delay / 1000)}s`,
+      actor: "ADDON",
+      actorName: addonId ?? serverId,
+      serverId,
+      addonId: addonId ?? c.addonId,
+      apiKeyId,
+      details: {
+        errorCode: code ?? ERROR_CODES.TEMPORARY_STORAGE_ERROR,
+        retryInMs: delay,
+        attempts,
+        maxAttempts: c.maxAttempts,
+        retryable: true,
+        response: response ?? null,
+      },
+    });
     return { ok: true as const, status: "FAILED" as const, retryInMs: delay };
   },
 });

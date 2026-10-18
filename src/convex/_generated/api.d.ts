@@ -40,6 +40,7 @@ import type * as lib_apiSchema from "../lib/apiSchema.js";
 import type * as lib_catalog from "../lib/catalog.js";
 import type * as lib_data from "../lib/data.js";
 import type * as lib_defaultPages from "../lib/defaultPages.js";
+import type * as lib_deliveryLog from "../lib/deliveryLog.js";
 import type * as lib_deliveryRecipe from "../lib/deliveryRecipe.js";
 import type * as lib_discord from "../lib/discord.js";
 import type * as lib_hash from "../lib/hash.js";
@@ -101,6 +102,7 @@ declare const fullApi: ApiFromModules<{
   "lib/catalog": typeof lib_catalog;
   "lib/data": typeof lib_data;
   "lib/defaultPages": typeof lib_defaultPages;
+  "lib/deliveryLog": typeof lib_deliveryLog;
   "lib/deliveryRecipe": typeof lib_deliveryRecipe;
   "lib/discord": typeof lib_discord;
   "lib/hash": typeof lib_hash;

@@ -80,6 +80,33 @@ export const DELIVERY_STATUS_COLOR: Record<string, string> = {
   failed: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
 };
 
+// Log completo de uma entrega automática (deliveryEvents).
+export const DELIVERY_EVENT_LABEL: Record<string, string> = {
+  CREATED: "Fila criada",
+  REDELIVERED: "Reenviada pelo painel",
+  RETRIED: "Devolvida para a fila",
+  CLAIMED: "Pega pelo addon",
+  CONFIRMED: "Confirmada pelo addon",
+  FAILED: "Falha na entrega",
+  CANCELED: "Cancelada",
+  REVERSAL_QUEUED: "Reversão enfileirada",
+  CLAIM_EXPIRED: "Claim expirado (voltou para a fila)",
+  AWAITING_PLAYER: "Aguardando o jogador entrar",
+};
+
+export const DELIVERY_EVENT_COLOR: Record<string, string> = {
+  CREATED: "text-muted-foreground",
+  REDELIVERED: "text-sky-500",
+  RETRIED: "text-sky-500",
+  CLAIMED: "text-violet-500",
+  CONFIRMED: "text-emerald-600 dark:text-emerald-400",
+  FAILED: "text-red-600 dark:text-red-400",
+  CANCELED: "text-zinc-500",
+  REVERSAL_QUEUED: "text-amber-600 dark:text-amber-400",
+  CLAIM_EXPIRED: "text-amber-600 dark:text-amber-400",
+  AWAITING_PLAYER: "text-amber-600 dark:text-amber-400",
+};
+
 export const DELIVERY_TYPE_LABEL: Record<string, string> = {
   none: "Sem entrega",
   command: "Comando de servidor",

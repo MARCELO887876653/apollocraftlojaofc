@@ -285,6 +285,8 @@ Content-Type: application/json
       "claim_token": "clm_9f2c...",
       "claimed_at": "2026-10-03T20:00:05.000Z",
       "claim_expires_at": "2026-10-03T20:05:05.000Z",
+      "resent": { "count": 1, "by": "Equipe", "at": "2026-10-03T19:58:00.000Z" },
+      "console_log": "[apollocraft] pedido #ORD-93241 | ADD_MONEY Moedas -> Steve123 | survival-01/economy | entrega del_m3f8a1b2c9d4 | tentativa 2/5 | REENVIADA 1x pelo painel (Equipe)",
       "payload": { "amount": 10000 },
       "order": { "id": "#ORD-93241", "client_identifier": "Steve123", "variables": [] }
     }
@@ -295,6 +297,16 @@ Content-Type: application/json
               mesmo com dois workers chamando ao mesmo tempo (transação do banco). Guarde o
               <code className="mx-1 rounded bg-muted px-1">claim_token</code> e envie-o ao confirmar.
               Se o lease expirar sem confirmação, a entrega volta para PENDING automaticamente.
+            </p>
+            <p>
+              <strong>Reenvio pelo painel:</strong> quando o operador usa “Reenviar (dar de novo)”, a
+              entrega volta para a fila com as tentativas zeradas e o próximo claim traz o bloco
+              <code className="mx-1 rounded bg-muted px-1">resent</code> (quantas vezes, quem e quando) junto com
+              <code className="mx-1 rounded bg-muted px-1">console_log</code> — uma linha pronta para imprimir no
+              console do servidor (<code className="rounded bg-muted px-1">console.log(console_log)</code> ou{" "}
+              <code className="rounded bg-muted px-1">tellraw</code>), provando no console que a entrega foi enviada
+              de novo e por quem. O histórico completo (criação, cada reenvio, cada claim, respostas e falhas) fica
+              no painel em Pedidos → entrega → “Ver log completo”.
             </p>
           </Section>
 

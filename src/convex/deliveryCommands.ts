@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { generateDeliveryId } from "./lib/hash";
 import { deliveryV1ToRecipe, normalizeActionForQuantity } from "./lib/deliveryRecipe";
+import { DELIVERY_EVENT, logDeliveryEvent, resendInfo, deliveryConsoleLine } from "./lib/deliveryLog";
 
 // Versão do schema do documento de entrega (permite evoluir sem quebrar
 // entregas antigas, que não possuem este campo).
@@ -48,6 +49,10 @@ function toApiShape(doc: any) {
     retryable: doc.retryable ?? null,
     next_attempt_at: doc.nextAttemptAt ? new Date(doc.nextAttemptAt).toISOString() : null,
     requires_manual_intervention: doc.requiresManualIntervention ?? false,
+    // Reenvio pelo painel (null quando nunca foi reenviada) + linha pronta
+    // para o addon imprimir no console do servidor.
+    resent: resendInfo(doc),
+    console_log: deliveryConsoleLine(doc),
     order: {
       id: doc.orderNumber,
       client_identifier: doc.clientIdentifier,
@@ -92,6 +97,28 @@ function toAdminShape(doc: any) {
     createdAt: doc.createdAt,
     completedAt: doc.completedAt,
     lastAttemptAt: doc.lastAttemptAt,
+    resentBy: doc.resentBy ?? "",
+    resentAt: doc.resentAt ?? null,
+    resendCount: doc.resendCount ?? 0,
+  };
+}
+
+function toEventShape(doc: any) {
+  return {
+    _id: doc._id as string,
+    deliveryId: doc.deliveryId as string,
+    publicId: doc.publicId,
+    orderNumber: doc.orderNumber,
+    type: doc.type,
+    status: doc.status ?? "",
+    message: doc.message ?? "",
+    actor: doc.actor,
+    actorName: doc.actorName ?? "",
+    serverId: doc.serverId ?? "",
+    addonId: doc.addonId ?? "",
+    apiKeyId: doc.apiKeyId ? String(doc.apiKeyId) : "",
+    details: doc.details ?? null,
+    createdAt: doc.createdAt,
   };
 }
 
@@ -137,8 +164,9 @@ export const internalCreateForOrder = internalMutation({
           action.mode === "LOCAL_REFERENCE" &&
           !(typeof action.referenceId === "string" && action.referenceId.trim())
         ) {
-          await ctx.db.insert("deliveryCommands", {
-            publicId: generateDeliveryId(),
+          const errorPublicId = generateDeliveryId();
+          const errorId = await ctx.db.insert("deliveryCommands", {
+            publicId: errorPublicId,
             idempotencyKey,
             orderId,
             orderNumber: order.number,
@@ -166,6 +194,19 @@ export const internalCreateForOrder = internalMutation({
             schemaVersion: DELIVERY_SCHEMA_VERSION,
             createdAt: now,
             updatedAt: now,
+          });
+          await logDeliveryEvent(ctx, {
+            deliveryId: errorId,
+            publicId: errorPublicId,
+            orderId,
+            orderNumber: order.number,
+            type: DELIVERY_EVENT.created,
+            status: "FAILED",
+            message: `Receita inválida: ${action.action} em LOCAL_REFERENCE sem reference_id (produto "${product.name}")`,
+            actor: "SYSTEM",
+            serverId: action.serverId?.trim() || "GLOBAL",
+            addonId: action.addonId?.trim() || "custom",
+            details: { errorCode: "CONFIGURATION_ERROR", referenceId: null },
           });
           created++;
           continue;
@@ -200,8 +241,9 @@ export const internalCreateForOrder = internalMutation({
             if (already) continue;
           }
 
-          await ctx.db.insert("deliveryCommands", {
-            publicId: generateDeliveryId(),
+          const commandPublicId = generateDeliveryId();
+          const commandId = await ctx.db.insert("deliveryCommands", {
+            publicId: commandPublicId,
             idempotencyKey: unitKey,
             orderId,
             orderNumber: order.number,
@@ -234,6 +276,31 @@ export const internalCreateForOrder = internalMutation({
             createdAt: now,
             updatedAt: now,
           });
+          await logDeliveryEvent(ctx, {
+            deliveryId: commandId,
+            publicId: commandPublicId,
+            orderId,
+            orderNumber: order.number,
+            type: DELIVERY_EVENT.created,
+            status: "PENDING",
+            message: `Fila criada: ${action.action}${
+              action.mode === "LOCAL_REFERENCE" && action.referenceId ? ` (local: ${action.referenceId})` : ""
+            } · unidade ${unit + 1}/${units}`,
+            actor: "SYSTEM",
+            serverId,
+            addonId,
+            details: {
+              mode: action.mode ?? "SERVER",
+              referenceId: action.referenceId ?? null,
+              command: action.command?.trim() || null,
+              quantity: qty,
+              unit: unit + 1,
+              units,
+              offlineExecute: action.offlineExecute ?? true,
+              actionId: action.actionId ?? `a${j}`,
+              stepIndex: j,
+            },
+          });
           created++;
 
           // Agendamento de reversão (ex.: VIP 30 dias → REMOVE_RANK depois)
@@ -244,8 +311,9 @@ export const internalCreateForOrder = internalMutation({
               .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", reverseKey))
               .first();
             if (!reverseExisting) {
-              await ctx.db.insert("deliveryCommands", {
-                publicId: generateDeliveryId(),
+              const reversePublicId = generateDeliveryId();
+              const reverseId = await ctx.db.insert("deliveryCommands", {
+                publicId: reversePublicId,
                 idempotencyKey: reverseKey,
                 orderId,
                 orderNumber: order.number,
@@ -267,6 +335,19 @@ export const internalCreateForOrder = internalMutation({
                 schemaVersion: DELIVERY_SCHEMA_VERSION,
                 createdAt: now,
                 updatedAt: now,
+              });
+              await logDeliveryEvent(ctx, {
+                deliveryId: reverseId,
+                publicId: reversePublicId,
+                orderId,
+                orderNumber: order.number,
+                type: DELIVERY_EVENT.reversalQueued,
+                status: "PENDING",
+                message: `Reversão agendada: ${action.reverseAction} em ${Math.max(0, action.reverseDelaySeconds ?? 0)}s`,
+                actor: "SYSTEM",
+                serverId,
+                addonId,
+                details: { reverseDelaySeconds: action.reverseDelaySeconds ?? 0 },
               });
               created++;
             }
@@ -302,6 +383,18 @@ export const internalCancelForOrder = internalMutation({
           completedAt: now,
           updatedAt: now,
         });
+        await logDeliveryEvent(ctx, {
+          deliveryId: c._id,
+          publicId: c.publicId,
+          orderId: c.orderId,
+          orderNumber: c.orderNumber,
+          type: DELIVERY_EVENT.canceled,
+          status: "CANCELED",
+          message: reason ?? "Pedido cancelado ou reembolsado",
+          actor: "SYSTEM",
+          serverId: c.serverId,
+          addonId: c.addonId,
+        });
         canceled++;
       } else if (c.status === "DONE" && c.reverseAction) {
         // reversão segura apenas quando configurada no produto
@@ -311,8 +404,9 @@ export const internalCancelForOrder = internalMutation({
           .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", reverseKey))
           .first();
         if (!existing) {
-          await ctx.db.insert("deliveryCommands", {
-            publicId: generateDeliveryId(),
+          const reversePublicId = generateDeliveryId();
+          const reverseId = await ctx.db.insert("deliveryCommands", {
+            publicId: reversePublicId,
             idempotencyKey: reverseKey,
             orderId: c.orderId,
             orderNumber: c.orderNumber,
@@ -332,6 +426,18 @@ export const internalCancelForOrder = internalMutation({
             maxAttempts: 5,
             createdAt: now,
             updatedAt: now,
+          });
+          await logDeliveryEvent(ctx, {
+            deliveryId: reverseId,
+            publicId: reversePublicId,
+            orderId: c.orderId,
+            orderNumber: c.orderNumber,
+            type: DELIVERY_EVENT.reversalQueued,
+            status: "PENDING",
+            message: `Reversão do reembolso: ${c.reverseAction}`,
+            actor: "SYSTEM",
+            serverId: c.serverId,
+            addonId: c.addonId,
           });
           reversed++;
         }
@@ -462,7 +568,27 @@ export const adminGet = query({
       .withIndex("by_delivery", (q) => q.eq("deliveryId", id))
       .collect();
     attempts.sort((a, b) => b.startedAt - a.startedAt);
-    return { command: toAdminShape(command), attempts };
+    const events = await ctx.db
+      .query("deliveryEvents")
+      .withIndex("by_delivery", (q) => q.eq("deliveryId", id))
+      .collect();
+    events.sort((a, b) => a.createdAt - b.createdAt);
+    return { command: toAdminShape(command), attempts, events: events.map(toEventShape) };
+  },
+});
+
+/** Log completo das entregas de um pedido (mais antigo primeiro). É o que o
+ *  painel mostra em "Ver log completo" no detalhe do pedido. */
+export const adminLogByOrder = query({
+  args: { orderId: v.id("orders") },
+  handler: async (ctx, { orderId }) => {
+    await requireAdmin(ctx, "deliveries.view");
+    const events = await ctx.db
+      .query("deliveryEvents")
+      .withIndex("by_order", (q) => q.eq("orderId", orderId))
+      .collect();
+    events.sort((a, b) => a.createdAt - b.createdAt);
+    return events.map(toEventShape);
   },
 });
 
@@ -485,6 +611,20 @@ export const adminRetry = mutation({
       claimToken: undefined,
       updatedAt: Date.now(),
     });
+    await logDeliveryEvent(ctx, {
+      deliveryId: id,
+      publicId: c.publicId,
+      orderId: c.orderId,
+      orderNumber: c.orderNumber,
+      type: DELIVERY_EVENT.retried,
+      status: "PENDING",
+      message: `Devolvida para a fila pelo painel (era ${c.status})`,
+      actor: "ADMIN",
+      actorName: admin.name,
+      serverId: c.serverId,
+      addonId: c.addonId,
+      details: { fromStatus: c.status, attempts: c.attempts },
+    });
     await logAudit(ctx, admin, "delivery_v1.retry", "deliveryCommands", id, { publicId: c.publicId });
   },
 });
@@ -499,8 +639,14 @@ export const adminRetry = mutation({
  * Agora a entrega volta como nova: 0 tentativas, sem erro anterior.
  */
 export const adminRedeliver = mutation({
-  args: { id: v.id("deliveryCommands"), confirm: v.boolean() },
-  handler: async (ctx, { id, confirm }) => {
+  args: {
+    id: v.id("deliveryCommands"),
+    confirm: v.boolean(),
+    // Reenvio que espera o jogador entrar: marca offlineExecute=false, então o
+    // addon devolve PLAYER_OFFLINE e a entrega fica na fila (sem gastar tentativa).
+    waitForOnline: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { id, confirm, waitForOnline }) => {
     const admin = await requireAdmin(ctx, "deliveries.manage");
     if (!confirm) throw new Error("Confirmação obrigatória para reenviar uma entrega.");
     const c = await ctx.db.get(id);
@@ -522,11 +668,41 @@ export const adminRedeliver = mutation({
       claimedAt: undefined,
       claimExpiresAt: undefined,
       claimToken: undefined,
+      // marcas do reenvio: vão no claim do addon (bloco `resent`) e no log
+      resentBy: admin.name ?? "painel",
+      resentAt: now,
+      resendCount: (c.resendCount ?? 0) + 1,
+      offlineExecute: waitForOnline ? false : c.offlineExecute,
       updatedAt: now,
+    });
+    await logDeliveryEvent(ctx, {
+      deliveryId: id,
+      publicId: c.publicId,
+      orderId: c.orderId,
+      orderNumber: c.orderNumber,
+      type: DELIVERY_EVENT.redelivered,
+      status: "PENDING",
+      message: waitForOnline
+        ? `Reenviada pelo painel — vai esperar o jogador entrar (era ${c.status})`
+        : `Reenviada pelo painel (era ${c.status})`,
+      actor: "ADMIN",
+      actorName: admin.name,
+      serverId: c.serverId,
+      addonId: c.addonId,
+      details: {
+        fromStatus: c.status,
+        previousAttempts: c.attempts,
+        previousError: c.lastError ?? c.errorCode ?? null,
+        previousResponse: c.response ?? null,
+        resendCount: (c.resendCount ?? 0) + 1,
+        waitForOnline: Boolean(waitForOnline),
+      },
     });
     await logAudit(ctx, admin, "delivery_v1.redeliver_done", "deliveryCommands", id, {
       publicId: c.publicId,
       fromStatus: c.status,
+      resendCount: (c.resendCount ?? 0) + 1,
+      waitForOnline: Boolean(waitForOnline),
     });
     return { ok: true as const };
   },
@@ -548,6 +724,20 @@ export const adminCancel = mutation({
       claimToken: undefined,
       completedAt: Date.now(),
       updatedAt: Date.now(),
+    });
+    await logDeliveryEvent(ctx, {
+      deliveryId: id,
+      publicId: c.publicId,
+      orderId: c.orderId,
+      orderNumber: c.orderNumber,
+      type: DELIVERY_EVENT.canceled,
+      status: "CANCELED",
+      message: `Cancelada pelo painel (era ${c.status})`,
+      actor: "ADMIN",
+      actorName: admin.name,
+      serverId: c.serverId,
+      addonId: c.addonId,
+      details: { fromStatus: c.status },
     });
     await logAudit(ctx, admin, "delivery_v1.cancel", "deliveryCommands", id, { publicId: c.publicId });
   },

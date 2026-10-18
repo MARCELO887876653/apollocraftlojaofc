@@ -189,6 +189,10 @@ export const apiV1Tables = {
     claimToken: v.optional(v.string()),
     // snapshot da receita de entrega no momento da compra (compras antigas não mudam)
     recipeSnapshot: v.optional(v.any()),
+    // ── reenvio pelo painel (aparece no claim do addon e no log) ──
+    resentBy: v.optional(v.string()), // nome do admin que reenviou
+    resentAt: v.optional(v.number()),
+    resendCount: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -199,6 +203,31 @@ export const apiV1Tables = {
     .index("by_client", ["clientIdentifier"])
     .index("by_order", ["orderId"])
     .index("by_group", ["deliveryGroupId"])
+    .index("by_createdAt", ["createdAt"]),
+
+  // ─── Log completo de cada entrega (linha do tempo do painel) ───
+  // Cada linha é um passo: criada, reenviada pelo admin, pega pelo addon,
+  // confirmada, falhou, cancelada... É o "log completo" que o operador vê
+  // ao abrir a entrega — nada é apagado quando alguém reenvia.
+  deliveryEvents: defineTable({
+    deliveryId: v.id("deliveryCommands"),
+    publicId: v.string(),
+    orderId: v.id("orders"),
+    orderNumber: v.string(),
+    // CREATED | REDELIVERED | RETRIED | CLAIMED | CONFIRMED | FAILED | CANCELED | REVERSAL_QUEUED
+    type: v.string(),
+    status: v.optional(v.string()),
+    message: v.optional(v.string()),
+    actor: v.string(), // SYSTEM | ADMIN | ADDON
+    actorName: v.optional(v.string()),
+    serverId: v.optional(v.string()),
+    addonId: v.optional(v.string()),
+    apiKeyId: v.optional(v.id("apiKeysV1")),
+    details: v.optional(v.any()),
+    createdAt: v.number(),
+  })
+    .index("by_delivery", ["deliveryId", "createdAt"])
+    .index("by_order", ["orderId", "createdAt"])
     .index("by_createdAt", ["createdAt"]),
 
   // ─── Histórico de tentativas de entrega ───

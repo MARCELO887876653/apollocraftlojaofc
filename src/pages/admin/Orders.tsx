@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useSearchParams } from "react-router";
 import { api } from "@/convex/_generated/api";
-import { formatBRL, formatDate, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_COLOR, DELIVERY_STATUS_LABEL } from "@/lib/format";
+import { formatBRL, formatDate, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_COLOR, DELIVERY_STATUS_LABEL, DELIVERY_EVENT_LABEL, DELIVERY_EVENT_COLOR } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Search, Loader2, Ban, CheckCircle2, PackagePlus, RefreshCw } from "lucide-react";
+import { Search, Loader2, Ban, CheckCircle2, PackagePlus, RefreshCw, ScrollText, ChevronDown, ChevronUp } from "lucide-react";
 
 type Order = {
   _id: string; number: string; customerName: string; customerEmail: string;
@@ -35,6 +35,25 @@ type Command = {
   attempts: number;
   maxAttempts: number;
   lastError?: string;
+  errorCode?: string;
+  response?: string;
+  executeAt?: number;
+  resendCount?: number;
+  resentBy?: string;
+  resentAt?: number | null;
+};
+
+// Linha do log completo de uma entrega (deliveryEvents).
+type CommandEvent = {
+  _id: string;
+  deliveryId: string;
+  publicId: string;
+  type: string;
+  status: string;
+  message: string;
+  actor: string;
+  actorName: string;
+  createdAt: number;
 };
 
 const COMMAND_LABEL: Record<string, string> = {
@@ -72,6 +91,12 @@ export default function AdminOrders() {
     api.deliveryCommands.adminListByOrder,
     selectedId ? { orderId: selectedId as any } : "skip",
   ) as Command[] | undefined;
+  // Log completo (linha do tempo) das entregas automáticas deste pedido:
+  // criação, cada reenvio, cada claim do addon, respostas e falhas.
+  const eventLog = useQuery(
+    api.deliveryCommands.adminLogByOrder,
+    selectedId ? { orderId: selectedId as any } : "skip",
+  ) as CommandEvent[] | undefined;
 
   // Entrega manual: o admin confirma o recebimento (PIX caiu mas o webhook
   // atrasou, por exemplo), escreve o que entregou e o pedido é fechado.
@@ -154,6 +179,9 @@ export default function AdminOrders() {
   // Reenvio: o botão existe SEMPRE, em qualquer status da entrega (concluída,
   // falhou, cancelada). Devolve a comando para a fila do addon como nova.
   const [redeliveringId, setRedeliveringId] = useState<string | null>(null);
+  const [openLogId, setOpenLogId] = useState<string | null>(null);
+  // Reenviar esperando o jogador entrar (offlineExecute=false no comando).
+  const [waitOnline, setWaitOnline] = useState(false);
 
   /** Reenvia a entrega (ex.: cliente comprou 2 e recebeu 1). Cada reenvio
    *  entrega uma unidade a mais — por isso pede confirmação quando já saiu. */
@@ -168,9 +196,11 @@ export default function AdminOrders() {
     }
     setRedeliveringId(id);
     try {
-      await redeliverCommand({ id: id as any, confirm: true });
+      await redeliverCommand({ id: id as any, confirm: true, waitForOnline: waitOnline });
       toast.success("Reenviado — a entrega voltou para a fila do addon", {
-        description: "Acompanhe o status aqui: Pendente → Processando → Concluída.",
+        description: waitOnline
+          ? "Vai esperar o jogador entrar: fica Pendente até ele estar online."
+          : "Acompanhe o status e o log completo aqui: Pendente → Processando → Concluída.",
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro ao reenviar a entrega";
@@ -560,49 +590,139 @@ export default function AdminOrders() {
                   )}
                   {commands && commands.length > 0 && (
                     <div className="space-y-1.5">
-                      {commands.map((c) => (
-                        <div key={c._id} className="rounded-md border px-3 py-2 text-xs">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="font-mono text-sky-500">{c.action}</span>
-                            <Badge variant="outline">
-                              {COMMAND_LABEL[c.status] ?? c.status}
-                            </Badge>
-                          </div>
-                          <p className="mt-1 text-muted-foreground">
-                            {c.productName} → {c.clientIdentifier} · {c.serverId}/{c.addonId} ·{" "}
-                            {c.attempts}/{c.maxAttempts} tentativas
-                          </p>
-                          {c.lastError && (
-                            <p className="mt-1 text-red-600 dark:text-red-400">{c.lastError}</p>
-                          )}
-                          {/* Sempre visível: mesmo com a entrega já concluída o
-                              botão continua aqui para repor uma unidade. */}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="mt-1.5 h-7"
-                            disabled={redeliveringId === c._id}
-                            onClick={() => redeliverCommandById(c._id, c.status)}
-                          >
-                            {redeliveringId === c._id ? (
-                              <Loader2 className="mr-1 size-3 animate-spin" />
-                            ) : (
-                              <RefreshCw className="mr-1 size-3" />
+                      {commands.map((c) => {
+                        const log = (eventLog ?? []).filter((e) => e.deliveryId === c._id);
+                        const logOpen = openLogId === c._id;
+                        const waitingPlayer =
+                          c.status === "PENDING" && c.errorCode === "PLAYER_OFFLINE";
+                        return (
+                          <div key={c._id} className="rounded-md border px-3 py-2 text-xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-mono text-sky-500">{c.action}</span>
+                              <span className="flex flex-wrap items-center gap-1.5">
+                                {waitingPlayer && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-amber-500/40 text-amber-600 dark:text-amber-400"
+                                  >
+                                    aguardando o jogador entrar
+                                  </Badge>
+                                )}
+                                <Badge variant="outline">
+                                  {COMMAND_LABEL[c.status] ?? c.status}
+                                </Badge>
+                              </span>
+                            </div>
+                            <p className="mt-1 text-muted-foreground">
+                              {c.productName} → {c.clientIdentifier} · {c.serverId}/{c.addonId} ·{" "}
+                              {c.attempts}/{c.maxAttempts} tentativas
+                            </p>
+                            {Boolean(c.resendCount) && (
+                              <p className="mt-0.5 text-sky-500">
+                                reenviada {c.resendCount}×{" "}
+                                {c.resentBy ? `por ${c.resentBy}` : "pelo painel"}
+                                {c.resentAt ? ` · ${formatDate(c.resentAt)}` : ""}
+                              </p>
                             )}
-                            Reenviar (dar de novo)
-                          </Button>
-                        </div>
-                      ))}
+                            {c.response && (
+                              <p className="mt-0.5 text-muted-foreground">
+                                addon respondeu: <span className="text-foreground">{c.response}</span>
+                              </p>
+                            )}
+                            {c.lastError && (
+                              <p className="mt-1 text-red-600 dark:text-red-400">
+                                {c.lastError}
+                                {c.errorCode ? ` (${c.errorCode})` : ""}
+                              </p>
+                            )}
+                            <div className="mt-1.5 flex flex-wrap gap-1.5">
+                              {/* Sempre visível: mesmo com a entrega já concluída o
+                                  botão continua aqui para repor uma unidade. */}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7"
+                                disabled={redeliveringId === c._id}
+                                onClick={() => redeliverCommandById(c._id, c.status)}
+                              >
+                                {redeliveringId === c._id ? (
+                                  <Loader2 className="mr-1 size-3 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="mr-1 size-3" />
+                                )}
+                                Reenviar (dar de novo)
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7"
+                                onClick={() => setOpenLogId(logOpen ? null : c._id)}
+                              >
+                                {logOpen ? (
+                                  <ChevronUp className="mr-1 size-3" />
+                                ) : (
+                                  <ChevronDown className="mr-1 size-3" />
+                                )}
+                                {logOpen ? "Ocultar log" : `Ver log completo${log.length ? ` (${log.length})` : ""}`}
+                              </Button>
+                            </div>
+                            {logOpen && (
+                              <div className="mt-2 rounded-lg border bg-muted/20 p-2">
+                                {log.length === 0 ? (
+                                  <p className="text-muted-foreground">
+                                    Sem eventos registrados — entrega criada antes do log
+                                    completo existir. Os reenvios feitos agora já aparecem aqui.
+                                  </p>
+                                ) : (
+                                  <ol className="space-y-1.5">
+                                    {log.map((e) => (
+                                      <li key={e._id} className="flex gap-2">
+                                        <ScrollText
+                                          className={`mt-0.5 size-3.5 shrink-0 ${
+                                            DELIVERY_EVENT_COLOR[e.type] ?? "text-muted-foreground"
+                                          }`}
+                                        />
+                                        <div className="min-w-0">
+                                          <p className="text-muted-foreground">
+                                            {formatDate(e.createdAt)} ·{" "}
+                                            <span className={DELIVERY_EVENT_COLOR[e.type] ?? "text-foreground"}>
+                                              {DELIVERY_EVENT_LABEL[e.type] ?? e.type}
+                                            </span>
+                                            {e.actorName ? ` · ${e.actorName}` : ""}
+                                          </p>
+                                          {e.message && <p className="break-words">{e.message}</p>}
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </ol>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                   {commands && commands.length > 0 && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Cliente recebeu menos do que comprou? Use{" "}
-                      <strong>Reenviar (dar de novo)</strong> — cada reenvio dá uma
-                      unidade extra no servidor. Se ficar em {""}
-                      <strong>Pendente</strong> por muito tempo, o addon do servidor não
-                      está consultando a fila.
-                    </p>
+                    <div className="mt-2 space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Cliente recebeu menos do que comprou? Use{" "}
+                        <strong>Reenviar (dar de novo)</strong> — cada reenvio dá uma
+                        unidade extra no servidor e fica registrado no{" "}
+                        <strong>log completo</strong> da entrega. Se ficar em {""}
+                        <strong>Pendente</strong> por muito tempo, o addon do servidor não
+                        está consultando a fila.
+                      </p>
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          className="size-3.5 accent-sky-500"
+                          checked={waitOnline}
+                          onChange={(e) => setWaitOnline(e.target.checked)}
+                        />
+                        Ao reenviar, esperar o jogador entrar (não entregar com ele offline)
+                      </label>
+                    </div>
                   )}
                 </div>
 

@@ -100,7 +100,10 @@ export async function checkDeployment(
     const res = await fetch(`${url}/api/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: "settings:getStore", args: {}, format: "json" }),
+      // A pergunta é feita na consulta que o app REALMENTE precisa para abrir
+      // (o shell da loja): assim um endereço que responde outras funções mas não
+      // tem esta é acusado em vez de passar no teste.
+      body: JSON.stringify({ path: "storefront:getShell", args: {}, format: "json" }),
       signal: controller.signal,
       cache: "no-store",
     });

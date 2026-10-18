@@ -40,14 +40,17 @@ describe("checkDeployment", () => {
   });
 
   test("servidor saudável responde ok", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({ status: "success", value: { name: "Apollo Craft" } }),
-      })),
-    );
+    const fetchMock = vi.fn(async (_url: string, _init?: { body?: string }) => ({
+      ok: true,
+      json: async () => ({ status: "success", value: { name: "Apollo Craft" } }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
     await expect(checkDeployment("https://loja.convex.cloud")).resolves.toEqual({ ok: true });
+
+    // O teste pergunta pela consulta que o app realmente precisa abrir: um
+    // endereço que responde outras funções mas não tem o shell precisa falhar.
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.path).toBe("storefront:getShell");
   });
 
   test("limite de uso vira falha explicável, não erro genérico", async () => {

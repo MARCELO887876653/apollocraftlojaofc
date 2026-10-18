@@ -34,7 +34,11 @@ import {
   checkDeployment,
   type DeploymentFailure,
 } from "@/lib/deployment-status";
-import { StoreShellProvider, useStoreShell } from "@/lib/storefront";
+import {
+  StoreShellProvider,
+  useStoreShell,
+  useStoreShellFailed,
+} from "@/lib/storefront";
 import { applyShareMeta } from "@/lib/seo";
 
 // Preview/captura de tela do ambiente Freebuff: carregado SOMENTE em
@@ -227,10 +231,69 @@ function ConvexApp({ children }: { children: React.ReactNode }) {
           canFailover={attempt < CONVEX_URLS.length - 1}
           onFailover={failover}
         />
-        {children}
+        <StoreContent
+          canFailover={attempt < CONVEX_URLS.length - 1}
+          onFailover={failover}
+        >
+          {children}
+        </StoreContent>
       </StoreShellProvider>
     </ConvexAuthProvider>
   );
+}
+
+/**
+ * Se o servidor recusou o shell (endereço morto, limite de uso, fora do ar),
+ * não montamos as páginas: cada uma abriria as próprias consultas e só
+ * multiplicaria erros. Mostramos o esqueleto enquanto o guard explica o motivo
+ * ou troca de endereço — a partir daí as páginas voltam sozinhas.
+ */
+function StoreContent({
+  canFailover,
+  onFailover,
+  children,
+}: {
+  canFailover: boolean;
+  onFailover: () => void;
+  children: React.ReactNode;
+}) {
+  const failed = useStoreShellFailed();
+  if (failed) return <RouteLoading />;
+  // Qualquer outra consulta que falhe (ex.: uma página específica) também não
+  // pode derrubar o site: o limite abaixo recupera ou troca de endereço.
+  return (
+    <QueryErrorRecovery canFailover={canFailover} onFailover={onFailover}>
+      {children}
+    </QueryErrorRecovery>
+  );
+}
+
+/**
+ * Rede de segurança para erro de QUALQUER consulta dentro das páginas.
+ *
+ * Sem isso, uma resposta com erro vira tela de erro em cima do site todo. Com
+ * um endereço de reserva configurado, trocamos para ele na hora; sem reserva,
+ * fica o esqueleto (e o guard mostra o motivo).
+ */
+class QueryErrorRecovery extends React.Component<
+  { canFailover: boolean; onFailover: () => void; children: React.ReactNode },
+  { caught: boolean }
+> {
+  state = { caught: false };
+
+  static getDerivedStateFromError() {
+    return { caught: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("[store] consulta falhou:", error?.message ?? error);
+    if (this.props.canFailover) this.props.onFailover();
+  }
+
+  render() {
+    if (this.state.caught) return <RouteLoading />;
+    return this.props.children;
+  }
 }
 
 /**
@@ -342,6 +405,8 @@ function ConnectionGuard({
   // Os dados da loja chegaram? É o próprio shell respondendo — sem assinatura
   // extra só para conferir se o servidor está vivo.
   const reachable = useStoreShell() !== undefined;
+  // O servidor RECUSOU o shell (endereço morto, limite de uso, fora do ar)?
+  const shellFailed = useStoreShellFailed();
   const { isWebSocketConnected } = useConvexConnectionState();
   const [failure, setFailure] = useState<DeploymentFailure | null>(null);
   const [timedOut, setTimedOut] = useState(false);
@@ -393,9 +458,17 @@ function ConnectionGuard({
     failures.current = 0;
     recovered.current = false;
     fired.current = false;
+    // Recusa do servidor: com endereço de reserva, troca IMEDIATAMENTE (foi
+    // assim que o site publicado, apontando para um deployment morto, voltou ao
+    // ar). Sem reserva, pergunta o motivo (1 chamada) e mostra a explicação.
+    if (shellFailed) {
+      if (canFailover) onFailover();
+      else void runCheck();
+      return;
+    }
     const timer = window.setTimeout(() => void runCheck(), SUSPECT_AFTER_MS);
     return () => window.clearTimeout(timer);
-  }, [reachable, runCheck]);
+  }, [reachable, shellFailed, canFailover, runCheck, onFailover]);
 
   // Se os dados chegaram, o servidor está claramente respondendo: some o aviso.
   useEffect(() => {
@@ -469,6 +542,9 @@ function ConnectionGuard({
     };
   }, [showing, failure, runCheck]);
 
+  // Com um endereço de reserva disponível nunca mostramos a tela de erro: o app
+  // já está trocando de endereço (o esqueleto cobre esse instante).
+  if (canFailover) return null;
   if (reachable && !failure) return null;
   if (!showing) return null;
 

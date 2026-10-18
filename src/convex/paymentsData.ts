@@ -27,6 +27,23 @@ export const internalGetStoreName = internalQuery({
   },
 });
 
+/** Pedidos pendentes que já têm cobrança no gateway — usados pela
+ *  reconciliação periódica (convex/crons.ts). */
+export const internalListPendingPayments = internalQuery({
+  args: { since: v.number(), limit: v.number() },
+  handler: async (ctx, { since, limit }) => {
+    const pending = await ctx.db
+      .query("orders")
+      .withIndex("by_paymentStatus", (q) => q.eq("paymentStatus", "pending"))
+      .collect();
+    return pending
+      .filter((o) => Boolean(o.gatewayPaymentId) && o.createdAt >= since)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit)
+      .map((o) => ({ id: o._id as string, gatewayPaymentId: o.gatewayPaymentId! }));
+  },
+});
+
 export const applyPaymentCreation = internalMutation({
   args: {
     orderId: v.id("orders"),

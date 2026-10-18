@@ -172,8 +172,11 @@ export const dashboard = query({
       visitsThisWeek,
       visitsTotal,
       topProducts,
-      recentOrders: orders
-        .sort((a, b) => b.createdAt - a.createdAt)
+      // "Últimos pagamentos" só lista quem realmente pagou. Antes entrava
+      // pedido pendente com valor verde de "+R$", contradizendo a página de
+      // pedidos (que mostrava o mesmo pedido como "Aguardando pagamento").
+      recentOrders: paid
+        .sort((a, b) => (b.paidAt ?? b.createdAt) - (a.paidAt ?? a.createdAt))
         .slice(0, 8)
         .map((o) => ({
           _id: o._id,

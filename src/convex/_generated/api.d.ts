@@ -22,6 +22,7 @@ import type * as auth_emailOtp from "../auth/emailOtp.js";
 import type * as categories from "../categories.js";
 import type * as content from "../content.js";
 import type * as coupons from "../coupons.js";
+import type * as crons from "../crons.js";
 import type * as customers from "../customers.js";
 import type * as deliveries from "../deliveries.js";
 import type * as deliveriesAdmin from "../deliveriesAdmin.js";
@@ -82,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   categories: typeof categories;
   content: typeof content;
   coupons: typeof coupons;
+  crons: typeof crons;
   customers: typeof customers;
   deliveries: typeof deliveries;
   deliveriesAdmin: typeof deliveriesAdmin;

@@ -553,8 +553,6 @@ export const adminUpdateStatus = mutation({
     await ctx.db.patch(id, {
       paymentStatus,
       updatedAt: now,
-    });
-    await ctx.db.patch(id, {
       statusHistory: [
         ...order.statusHistory,
         { status: paymentStatus, at: now, note: note ?? `Atualizado manualmente por ${admin.name}` },
@@ -576,6 +574,134 @@ export const adminUpdateStatus = mutation({
       });
     }
     await logAudit(ctx, admin, "order.status_update", "order", id, { paymentStatus });
+  },
+});
+
+/** Entrega manual pelo painel — o caminho para quando o PIX caiu mas o webhook
+ *  não confirmou (ou o jogador recebeu o produto por fora).
+ *
+ *  - confirma o pagamento quando o admin pede (pedido pendente);
+ *  - conclui as entregas do pedido com a observação escrita pelo admin;
+ *  - cancela os comandos automáticos ainda na fila, senão o addon entregaria
+ *    o mesmo produto de novo quando o jogador entrasse no servidor. */
+export const adminDeliverManually = mutation({
+  args: {
+    id: v.id("orders"),
+    note: v.optional(v.string()),
+    confirmPayment: v.boolean(),
+  },
+  handler: async (ctx, { id, note, confirmPayment }) => {
+    const admin = await requireAdmin(ctx, "orders.manage");
+    const order = await ctx.db.get(id);
+    if (!order) throw new ConvexError("Pedido não encontrado");
+    const now = Date.now();
+    const trimmed = note?.trim();
+    const manualNote = trimmed
+      ? `Entrega manual por ${admin.name}: ${trimmed}`
+      : `Entrega manual por ${admin.name}`;
+
+    const wasPending = order.paymentStatus !== "paid";
+    if (wasPending) {
+      if (!confirmPayment) {
+        throw new ConvexError(
+          "Este pedido ainda está aguardando pagamento. Marque o pagamento como recebido para entregar.",
+        );
+      }
+      await ctx.db.patch(id, {
+        paymentStatus: "paid",
+        paidAt: order.paidAt ?? now,
+        updatedAt: now,
+        statusHistory: [
+          ...order.statusHistory,
+          {
+            status: "paid",
+            at: now,
+            note: `Pagamento confirmado por ${admin.name} (entrega manual)`,
+          },
+        ],
+      });
+      await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
+        event: "order.paid",
+        payload: {
+          orderNumber: order.number,
+          total: order.totalCents / 100,
+          customerEmail: order.customerEmail,
+          customerName: order.customerName,
+          items: order.items.map((i: any) => ({
+            name: i.name,
+            variant: i.variantName,
+            quantity: i.quantity,
+          })),
+        },
+      });
+    }
+
+    // Comandos automáticos ainda não executados: cancelar para não duplicar.
+    const commands = await ctx.db
+      .query("deliveryCommands")
+      .withIndex("by_order", (q) => q.eq("orderId", id))
+      .collect();
+    let canceledCommands = 0;
+    for (const c of commands) {
+      if (c.status !== "PENDING" && c.status !== "PROCESSING") continue;
+      await ctx.db.patch(c._id, {
+        status: "CANCELED",
+        response: "Entregue manualmente pelo painel",
+        reason: manualNote,
+        claimedBy: undefined,
+        claimedAt: undefined,
+        claimExpiresAt: undefined,
+        claimToken: undefined,
+        completedAt: now,
+        updatedAt: now,
+      });
+      canceledCommands++;
+    }
+
+    // Entregas do pedido: concluídas com o registro do admin.
+    const deliveries = await ctx.db
+      .query("deliveries")
+      .withIndex("by_order", (q) => q.eq("orderId", id))
+      .collect();
+    let delivered = 0;
+    for (const d of deliveries) {
+      if (d.status === "delivered") continue;
+      await ctx.db.patch(d._id, {
+        status: "delivered",
+        deliveredAt: now,
+        lastError: undefined,
+        payload: trimmed ?? "Entregue manualmente pelo painel",
+        updatedAt: now,
+      });
+      delivered++;
+    }
+
+    if (order.deliveryStatus !== "delivered") {
+      await ctx.db.patch(id, {
+        deliveryStatus: "delivered",
+        updatedAt: now,
+        statusHistory: [
+          ...(wasPending
+            ? [
+                ...order.statusHistory,
+                {
+                  status: "paid",
+                  at: now,
+                  note: `Pagamento confirmado por ${admin.name} (entrega manual)`,
+                },
+              ]
+            : order.statusHistory),
+          { status: "delivered", at: now, note: manualNote },
+        ],
+      });
+    }
+
+    await logAudit(ctx, admin, "order.manual_delivery", "order", id, {
+      delivered,
+      canceledCommands,
+      paid: wasPending,
+    });
+    return { delivered, canceledCommands, paid: wasPending };
   },
 });
 

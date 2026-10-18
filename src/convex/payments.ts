@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "./_generated/server";
+import { action, internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import crypto from "node:crypto";
 
@@ -149,6 +149,34 @@ function mapMpStatus(status: string | undefined): string {
     default: return "pending";
   }
 }
+
+// ─── Reconciliação periódica (convex/crons.ts) ───
+//
+// O webhook é o caminho normal, mas depende de a URL estar cadastrada no
+// Mercado Pago e de a notificação chegar. Quando ela falha, o PIX entra na
+// conta e o pedido fica "Aguardando pagamento" para sempre. Este job confirma
+// no gateway os pedidos pendentes recentes; o que estiver aprovado é marcado
+// como pago (e a entrega é enfileirada, como no webhook).
+
+export const reconcilePending = internalAction({
+  args: {},
+  handler: async (ctx: any) => {
+    const pending = (await ctx.runQuery(dataApi().internalListPendingPayments, {
+      since: Date.now() - 3 * 24 * 60 * 60 * 1000,
+      limit: 20,
+    })) as Array<{ id: string; gatewayPaymentId: string }>;
+    let synced = 0;
+    for (const p of pending) {
+      try {
+        const res = await syncGatewayPayment(ctx, p.gatewayPaymentId, p.id);
+        if (res.status !== "pending") synced++;
+      } catch {
+        // um pedido com erro não pode impedir a checagem dos outros
+      }
+    }
+    return { checked: pending.length, synced };
+  },
+});
 
 // ─── Webhook do Mercado Pago (via http.ts) ───
 

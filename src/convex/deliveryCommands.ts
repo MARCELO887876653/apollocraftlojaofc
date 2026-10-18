@@ -422,6 +422,20 @@ export const adminList = query({
   },
 });
 
+/** Entregas automáticas de um pedido — mostradas no detalhe do pedido para o
+ *  admin ver o que já saiu (ou travou) sem abrir a página de entregas. */
+export const adminListByOrder = query({
+  args: { orderId: v.id("orders") },
+  handler: async (ctx, { orderId }) => {
+    await requireAdmin(ctx, "deliveries.view");
+    const list = await ctx.db
+      .query("deliveryCommands")
+      .withIndex("by_order", (q) => q.eq("orderId", orderId))
+      .collect();
+    return list.sort((a, b) => a.createdAt - b.createdAt).map(toAdminShape);
+  },
+});
+
 export const adminGet = query({
   args: { id: v.id("deliveryCommands") },
   handler: async (ctx, { id }) => {

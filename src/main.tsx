@@ -105,7 +105,24 @@ const STORE_ROUTE_LOADERS = [
   () => import("./pages/Auth.tsx"),
 ];
 
+/**
+ * Pré-carregar 6 rotas custa 6 requisições. Em conexão medida (Save-Data ou
+ * 2G) isso é caro e ninguém navega rápido o bastante para aproveitar — então
+ * ali não pré-carregamos nada.
+ */
+function canPrefetch(): boolean {
+  const connection = (
+    navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }
+  ).connection;
+  if (!connection) return true;
+  if (connection.saveData) return false;
+  return connection.effectiveType !== "slow-2g" && connection.effectiveType !== "2g";
+}
+
 function prefetchStoreRoutes() {
+  if (!canPrefetch()) return;
   for (const load of STORE_ROUTE_LOADERS) load().catch(() => {});
 }
 

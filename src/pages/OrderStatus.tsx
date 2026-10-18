@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { useAction, useQuery } from "convex/react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { api } from "@/convex/_generated/api";
@@ -9,7 +9,6 @@ import { formatBRL, formatDate, PAYMENT_STATUS_LABEL, DELIVERY_STATUS_LABEL } fr
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { useMutation } from "convex/react";
 import { toast } from "sonner";
 import {
   CheckCircle2, Clock, Copy, Loader2, PackageCheck, QrCode, XCircle, CreditCard, CheckCheck,
@@ -34,6 +33,9 @@ type Order = {
   paidAt?: number;
   statusHistory: Array<{ status: string; at: number; note?: string }>;
 };
+
+/** Depois disso o PIX já venceu: paramos de perguntar ao gateway. */
+const MAX_PIX_POLL_MS = 20 * 60 * 1000;
 
 const STATUS_COLORS: Record<string, string> = {
   paid: "bg-emerald-500/15 text-emerald-700 border-emerald-500/30",
@@ -63,22 +65,49 @@ export default function OrderStatusPage() {
 
   const [creatingPix, setCreatingPix] = useState(false);
   const [pixFailed, setPixFailed] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const createPix = useAction(api.payments.createPixPayment);
   const refreshStatus = useAction(api.payments.refreshPaymentStatus);
 
-  // Polling: consulta gateway a cada 5s enquanto pendente
-  const [tick, setTick] = useState(0);
+  // Consulta o gateway só enquanto o PIX está pendente — e cada vez com menos
+  // pressa. Antes era uma chamada a cada 5s para sempre (720 por hora, mesmo
+  // com a aba escondida). O webhook do gateway grava a confirmação no banco e
+  // esta tela reage sozinha; o laço abaixo cobre só o caso de ele atrasar.
   useEffect(() => {
-    if (order?.paymentStatus !== "pending" || !order?.gatewayPaymentId) return;
-    const iv = setInterval(() => setTick((t) => t + 1), 5000);
-    return () => clearInterval(iv);
-  }, [order?.paymentStatus, order?.gatewayPaymentId]);
+    const orderId = order?._id;
+    if (order?.paymentStatus !== "pending" || !order?.gatewayPaymentId || !orderId) return;
 
-  useEffect(() => {
-    if (tick === 0 || order?.paymentStatus !== "pending") return;
-    refreshStatus({ orderId: order._id as any }).catch(() => {});
-  }, [tick, order?._id, order?.paymentStatus, refreshStatus]);
+    const startedAt = Date.now();
+    let timer: number | undefined;
+    let stopped = false;
+
+    const ask = () => {
+      if (stopped || document.visibilityState !== "visible") return;
+      void refreshStatus({ orderId: orderId as any }).catch(() => {});
+    };
+
+    const schedule = () => {
+      if (stopped) return;
+      const elapsed = Date.now() - startedAt;
+      // Passou do prazo do PIX: o QR já venceu e não há o que esperar.
+      if (elapsed > MAX_PIX_POLL_MS) return;
+      const delay = elapsed < 60_000 ? 5_000 : elapsed < 300_000 ? 15_000 : 30_000;
+      timer = window.setTimeout(() => {
+        ask();
+        schedule();
+      }, delay);
+    };
+
+    // Aba voltou a ficar visível: confere na hora, sem esperar o intervalo.
+    const onVisible = () => ask();
+
+    schedule();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [order?._id, order?.paymentStatus, order?.gatewayPaymentId, refreshStatus]);
 
   // Auto-criar PIX quando o pedido está pendente sem dados de pagamento
   useEffect(() => {

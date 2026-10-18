@@ -1,4 +1,5 @@
 import { query } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
   DEFAULT_HOMEPAGE,
@@ -12,6 +13,7 @@ import {
   readCategoryBySlug,
   readProductBySlug,
   readRelatedProducts,
+  selectHomeProducts,
 } from "./lib/storefrontData";
 
 // Tipos do shell derivados dos padrões do projeto: o frontend importa estes
@@ -74,9 +76,28 @@ export const getShell = query({
   },
 });
 
+/** Seções da home que mostram uma lista de produtos. */
+const PRODUCT_SECTIONS = ["featured", "promo", "popular", "newest"] as const;
+type ProductSectionType = (typeof PRODUCT_SECTIONS)[number];
+/** Produto já com o nome da categoria (mesmo formato de `withCategoryNames`). */
+type ProductCard = Doc<"products"> & { categoryName?: string };
+
+/** Quantidade pedida pela seção (mesma regra do editor do painel: 8 por padrão). */
+function sectionLimit(sections: HomeSectionConfig[], type: ProductSectionType): number {
+  const raw = sections.find((s) => s.type === type)?.config?.count;
+  // Igual ao que a tela fazia antes: `config?.count ?? 8`.
+  return typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 8;
+}
+
 /**
  * Tudo que a home monta numa chamada só: a ordem das seções, o banner do topo,
- * as categorias, o pódio dos compradores e o FAQ.
+ * as categorias, o pódio dos compradores, o FAQ e — o que mais pesava — as
+ * listas de produtos de cada seção.
+ *
+ * Antes cada seção da home (destaques, promoções, mais vendidos, lançamentos)
+ * abria a própria assinatura: a home fazia 6 chamadas de função para pintar.
+ * Agora faz 2 (o shell + esta). De quebra, os quatro catálogos saem de UMA
+ * varredura de produtos, em vez de quatro.
  */
 export const getHome = query({
   args: {},
@@ -93,6 +114,29 @@ export const getHome = query({
     const categories = await ctx.db.query("categories").collect();
     const faqs = await ctx.db.query("faqs").collect();
 
+    // Produtos das seções visíveis — só do que está ligado na home.
+    const enabled = homepage.filter((s) => s.enabled);
+    const wanted = PRODUCT_SECTIONS.filter((type) => enabled.some((s) => s.type === type));
+    const products: Partial<Record<ProductSectionType, ProductCard[]>> = {};
+
+    if (wanted.length > 0) {
+      const all = await ctx.db
+        .query("products")
+        .withIndex("by_active_order", (q) => q.eq("active", true))
+        .collect();
+      // Nome da categoria vem da lista que já lemos acima: nada de varredura extra.
+      const nameById = new Map(categories.map((c) => [c._id, c.name]));
+      const withNames = (list: typeof all): ProductCard[] =>
+        list.map((p) => ({
+          ...p,
+          categoryName: p.categoryId ? nameById.get(p.categoryId) : undefined,
+        }));
+
+      for (const type of wanted) {
+        products[type] = withNames(selectHomeProducts(all, type, sectionLimit(enabled, type)));
+      }
+    }
+
     // Top 3 compradores: índice por total gasto (maior → menor), sem varrer
     // todos os clientes.
     const top = await ctx.db
@@ -103,6 +147,7 @@ export const getHome = query({
 
     return {
       homepage,
+      products,
       banners: heroBanners.filter((b) => b.active),
       categories: categories
         .filter((c) => c.active)

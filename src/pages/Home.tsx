@@ -1,6 +1,4 @@
-import { useQuery } from "convex/react";
 import { motion } from "framer-motion";
-import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import {
@@ -501,6 +499,11 @@ export default function Home() {
   const data = useHomeData();
   const store = useStoreShell()?.store;
   const homepage = (data?.homepage as Section[] | undefined) ?? [];
+  // As listas de produtos vêm no MESMO pacote da home (getHome). Antes cada
+  // seção abria a própria assinatura e a home fazia 6 chamadas para pintar.
+  const lists = (data?.products ?? {}) as Partial<
+    Record<"featured" | "promo" | "popular" | "newest", Product[]>
+  >;
 
   return (
     <StoreLayout>
@@ -517,13 +520,13 @@ export default function Home() {
             case "categories":
               return <Categories key={section.id} categories={data?.categories} />;
             case "featured":
-              return <Featured key={section.id} config={cfg} />;
+              return <Featured key={section.id} config={cfg} products={lists.featured} />;
             case "promo":
-              return <Promo key={section.id} config={cfg} />;
+              return <Promo key={section.id} config={cfg} products={lists.promo} />;
             case "popular":
-              return <Popular key={section.id} config={cfg} />;
+              return <Popular key={section.id} config={cfg} products={lists.popular} />;
             case "new":
-              return <Newest key={section.id} config={cfg} />;
+              return <Newest key={section.id} config={cfg} products={lists.newest} />;
             case "server":
               return <ServerSection key={section.id} config={cfg} ip={store?.serverIp} />;
             case "top3":
@@ -538,8 +541,8 @@ export default function Home() {
   );
 }
 
-function Featured({ config }: { config: any }) {
-  const products = useQuery(api.products.listFeatured, { limit: config?.count ?? 8 }) as any[] | undefined;
+// Seções de produto: só apresentação — os dados chegam pelo pacote da home.
+function Featured({ config, products }: { config: any; products?: Product[] }) {
   return (
     <ProductSection
       title={config?.title ?? "Produtos em destaque"}
@@ -548,15 +551,12 @@ function Featured({ config }: { config: any }) {
     />
   );
 }
-function Promo({ config }: { config: any }) {
-  const products = useQuery(api.products.listPromo, { limit: config?.count ?? 8 }) as any[] | undefined;
+function Promo({ config, products }: { config: any; products?: Product[] }) {
   return <ProductSection title={config?.title ?? "Promoções"} products={products} />;
 }
-function Popular({ config }: { config: any }) {
-  const products = useQuery(api.products.listPopular, { limit: config?.count ?? 8 }) as any[] | undefined;
+function Popular({ config, products }: { config: any; products?: Product[] }) {
   return <ProductSection title={config?.title ?? "Mais vendidos"} products={products} />;
 }
-function Newest({ config }: { config: any }) {
-  const products = useQuery(api.products.listNewest, { limit: config?.count ?? 8 }) as any[] | undefined;
+function Newest({ config, products }: { config: any; products?: Product[] }) {
   return <ProductSection title={config?.title ?? "Lançamentos"} products={products} />;
 }

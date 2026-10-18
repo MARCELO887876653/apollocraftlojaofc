@@ -101,6 +101,48 @@ export async function readActiveProducts(
   return list.slice(0, limit ?? 60);
 }
 
+/** Seções da home que mostram lista de produtos (mesmos nomes do editor). */
+export type HomeProductList = "featured" | "promo" | "popular" | "newest";
+
+/**
+ * Seleciona os produtos de uma seção da home.
+ *
+ * É a MESMA regra de `products.listFeatured` / `listPromo` / `listPopular` /
+ * `listNewest` — só que aplicada a uma lista já lida, para a home montar as
+ * quatro seções com uma varredura só. Não altera o array recebido.
+ */
+export function selectHomeProducts<T extends {
+  hidden?: boolean;
+  featured?: boolean;
+  popular?: boolean;
+  order: number;
+  salesCount: number;
+  createdAt: number;
+  priceCents: number;
+  compareAtPriceCents?: number;
+}>(all: T[], list: HomeProductList, limit = 8): T[] {
+  const visible = all.filter((p) => !p.hidden);
+  let picked: T[];
+  switch (list) {
+    case "featured":
+      picked = visible.filter((p) => p.featured).sort((a, b) => a.order - b.order);
+      break;
+    case "promo":
+      picked = visible
+        .filter(
+          (p) => p.compareAtPriceCents !== undefined && p.compareAtPriceCents > p.priceCents,
+        )
+        .sort((a, b) => b.createdAt - a.createdAt);
+      break;
+    case "popular":
+      picked = visible.filter((p) => p.popular).sort((a, b) => b.salesCount - a.salesCount);
+      break;
+    default:
+      picked = [...visible].sort((a, b) => b.createdAt - a.createdAt);
+  }
+  return picked.slice(0, Math.max(0, limit));
+}
+
 export type ProductPageCore = {
   product: Doc<"products">;
   variants: Doc<"productVariants">[];

@@ -535,22 +535,65 @@ describe("retry profissional", () => {
 // Quantidade
 // ─────────────────────────────────────────────────────────────
 describe("normalização de quantidade", () => {
-  test("MULTIPLY multiplica o valor; REPEAT expõe repeat", async () => {
+  test("MULTIPLY multiplica o valor do payload num único comando", async () => {
     const t = convexTest(schema, modules);
     const { orderId } = await seedOrder(
       t,
       [
         { action: "ADD_MONEY", payload: { amount: 10000 }, quantityMode: "MULTIPLY", serverId: "survival-01", offlineExecute: true },
-        { action: "GIVE_KIT", payload: {}, quantityMode: "REPEAT", serverId: "survival-01", offlineExecute: true },
       ],
       { quantity: 3 },
     );
     await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
     const all = await commands(t);
-    const money = all.find((c) => c.action === "ADD_MONEY")!;
-    const kit = all.find((c) => c.action === "GIVE_KIT")!;
-    expect(money.payload).toEqual({ amount: 30000 });
-    expect(kit.variables.find((v: { name: string; value: string }) => v.name === "repeat")?.value).toBe("3");
+    expect(all).toHaveLength(1);
+    expect(all[0].payload).toEqual({ amount: 30000 });
+  });
+
+  test("compra de 3 kits gera 3 entregas (uma por unidade)", async () => {
+    const t = convexTest(schema, modules);
+    const { orderId } = await seedOrder(
+      t,
+      [
+        { action: "GIVE_KIT", payload: {}, quantityMode: "REPEAT", serverId: "survival-01", offlineExecute: true },
+      ],
+      { quantity: 3 },
+    );
+
+    // Reexecutar não pode duplicar (idempotência do pedido).
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+
+    const all = await commands(t);
+    expect(all).toHaveLength(3);
+    expect(all.every((c) => c.action === "GIVE_KIT")).toBe(true);
+    expect(new Set(all.map((c) => c.idempotencyKey)).size).toBe(3);
+  });
+
+  test("modo padrão do painel também entrega por unidade", async () => {
+    const t = convexTest(schema, modules);
+    const { orderId } = await seedOrder(
+      t,
+      [
+        { action: "GIVE_KIT", payload: {}, serverId: "survival-01", offlineExecute: true },
+      ],
+      { quantity: 2 },
+    );
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+    expect(await commands(t)).toHaveLength(2);
+  });
+
+  test("IGNORE entrega uma única vez mesmo com quantidade maior", async () => {
+    const t = convexTest(schema, modules);
+    const { orderId } = await seedOrder(
+      t,
+      [
+        { action: "ADD_RANK", payload: {}, quantityMode: "IGNORE", serverId: "survival-01", offlineExecute: true },
+      ],
+      { quantity: 3 },
+    );
+    await t.mutation(internal.deliveryCommands.internalCreateForOrder, { orderId });
+    expect(await commands(t)).toHaveLength(1);
   });
 });
 

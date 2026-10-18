@@ -176,7 +176,7 @@ export const internalCreateForOrder = internalMutation({
         const executeAt = now + Math.max(0, action.delaySeconds ?? 0) * 1000;
         // Normaliza a ação pela quantidade comprada (MULTIPLY/REPEAT/IGNORE)
         const qty = Math.max(1, Math.trunc(item.quantity ?? 1));
-        const { payload: normalizedPayload, repeat } = normalizeActionForQuantity(action, qty);
+        const { payload: normalizedPayload, repeat: units } = normalizeActionForQuantity(action, qty);
         const variables = [
           { name: "nickname", value: clientIdentifier },
           { name: "produto", value: item.name ?? product.name },
@@ -184,77 +184,92 @@ export const internalCreateForOrder = internalMutation({
           { name: "quantidade", value: String(qty) },
           { name: "pedido", value: order.number },
         ];
-        if (repeat > 1) variables.push({ name: "repeat", value: String(repeat) });
 
-        await ctx.db.insert("deliveryCommands", {
-          publicId: generateDeliveryId(),
-          idempotencyKey,
-          orderId,
-          orderNumber: order.number,
-          orderItemIndex: i,
-          productId: product._id,
-          productName: product.name,
-          serverId,
-          addonId,
-          clientIdentifier,
-          action: action.action,
-          actionId: action.actionId ?? `a${j}`,
-          stepIndex: j,
-          deliveryGroupId: `${orderId}:${i}`,
-          deliveryMode: action.mode ?? "SERVER",
-          referenceId: action.referenceId ?? undefined,
-          referenceRevision: action.referenceRevision ?? undefined,
-          command: action.command?.trim() || undefined,
-          payload: normalizedPayload ?? undefined,
-          recipeSnapshot,
-          variables,
-          offlineExecute: action.offlineExecute ?? true,
-          executeAt,
-          status: "PENDING",
-          attempts: 0,
-          maxAttempts: 5,
-          schemaVersion: DELIVERY_SCHEMA_VERSION,
-          reverseAction: action.reverseAction?.trim() || undefined,
-          reversePayload: action.reversePayload ?? undefined,
-          reverseDelaySeconds: action.reverseDelaySeconds ?? undefined,
-          createdAt: now,
-          updatedAt: now,
-        });
-        created++;
+        // Um comando por unidade comprada: o addon entrega uma unidade por
+        // comando. Antes a quantidade ia só na variável `quantidade` e quem
+        // comprava 2 kits recebia 1 — o segundo nunca era enfileirado.
+        for (let unit = 0; unit < units; unit++) {
+          // Primeira unidade mantém a chave antiga (pedidos já processados
+          // não duplicam); as seguintes ganham sufixo próprio.
+          const unitKey = unit === 0 ? idempotencyKey : `${idempotencyKey}:u${unit + 1}`;
+          if (unit > 0) {
+            const already = await ctx.db
+              .query("deliveryCommands")
+              .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", unitKey))
+              .first();
+            if (already) continue;
+          }
 
-        // Agendamento de reversão (ex.: VIP 30 dias → REMOVE_RANK depois)
-        if (action.reverseAction) {
-          const reverseKey = `${idempotencyKey}:reverse`;
-          const reverseExisting = await ctx.db
-            .query("deliveryCommands")
-            .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", reverseKey))
-            .first();
-          if (!reverseExisting) {
-            await ctx.db.insert("deliveryCommands", {
-              publicId: generateDeliveryId(),
-              idempotencyKey: reverseKey,
-              orderId,
-              orderNumber: order.number,
-              orderItemIndex: i,
-              productId: product._id,
-              productName: product.name,
-              serverId,
-              addonId,
-              clientIdentifier,
-              action: action.reverseAction,
-              payload: action.reversePayload ?? undefined,
-              recipeSnapshot,
-              variables,
-              offlineExecute: action.offlineExecute ?? true,
-              executeAt: executeAt + Math.max(0, action.reverseDelaySeconds ?? 0) * 1000,
-              status: "PENDING",
-              attempts: 0,
-              maxAttempts: 5,
-              schemaVersion: DELIVERY_SCHEMA_VERSION,
-              createdAt: now,
-              updatedAt: now,
-            });
-            created++;
+          await ctx.db.insert("deliveryCommands", {
+            publicId: generateDeliveryId(),
+            idempotencyKey: unitKey,
+            orderId,
+            orderNumber: order.number,
+            orderItemIndex: i,
+            productId: product._id,
+            productName: product.name,
+            serverId,
+            addonId,
+            clientIdentifier,
+            action: action.action,
+            actionId: action.actionId ?? `a${j}`,
+            stepIndex: j,
+            deliveryGroupId: `${orderId}:${i}`,
+            deliveryMode: action.mode ?? "SERVER",
+            referenceId: action.referenceId ?? undefined,
+            referenceRevision: action.referenceRevision ?? undefined,
+            command: action.command?.trim() || undefined,
+            payload: normalizedPayload ?? undefined,
+            recipeSnapshot,
+            variables,
+            offlineExecute: action.offlineExecute ?? true,
+            executeAt,
+            status: "PENDING",
+            attempts: 0,
+            maxAttempts: 5,
+            schemaVersion: DELIVERY_SCHEMA_VERSION,
+            reverseAction: action.reverseAction?.trim() || undefined,
+            reversePayload: action.reversePayload ?? undefined,
+            reverseDelaySeconds: action.reverseDelaySeconds ?? undefined,
+            createdAt: now,
+            updatedAt: now,
+          });
+          created++;
+
+          // Agendamento de reversão (ex.: VIP 30 dias → REMOVE_RANK depois)
+          if (action.reverseAction) {
+            const reverseKey = `${unitKey}:reverse`;
+            const reverseExisting = await ctx.db
+              .query("deliveryCommands")
+              .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", reverseKey))
+              .first();
+            if (!reverseExisting) {
+              await ctx.db.insert("deliveryCommands", {
+                publicId: generateDeliveryId(),
+                idempotencyKey: reverseKey,
+                orderId,
+                orderNumber: order.number,
+                orderItemIndex: i,
+                productId: product._id,
+                productName: product.name,
+                serverId,
+                addonId,
+                clientIdentifier,
+                action: action.reverseAction,
+                payload: action.reversePayload ?? undefined,
+                recipeSnapshot,
+                variables,
+                offlineExecute: action.offlineExecute ?? true,
+                executeAt: executeAt + Math.max(0, action.reverseDelaySeconds ?? 0) * 1000,
+                status: "PENDING",
+                attempts: 0,
+                maxAttempts: 5,
+                schemaVersion: DELIVERY_SCHEMA_VERSION,
+                createdAt: now,
+                updatedAt: now,
+              });
+              created++;
+            }
           }
         }
       }

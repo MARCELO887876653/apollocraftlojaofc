@@ -165,9 +165,17 @@ export function deliveryV1ToRecipe(v1: any): DeliveryRecipe {
 
 /**
  * Normaliza uma ação pela quantidade comprada.
- * MULTIPLY → multiplica valores numéricos do payload (amount/value/qty/quantity).
- * REPEAT   → repete a ação `quantity` vezes (exposto via `__repeat` no snapshot).
- * IGNORE   → entrega uma única vez, independente da quantidade.
+ *
+ * `repeat` é quantos comandos a fila deve criar — **um por unidade comprada**.
+ * O addon entrega uma unidade por comando; mandar só a variável `quantidade`
+ * (comportamento antigo) fazia o cliente comprar 2 e receber 1.
+ *
+ * MULTIPLY → multiplica valores numéricos do payload (amount/value/qty/quantity)
+ *            e entrega um único comando (o valor já representa o total).
+ *            Sem nenhum número para multiplicar, cai em 1 comando por unidade.
+ * REPEAT   → 1 comando por unidade.
+ * IGNORE   → sempre 1 comando (cargos e itens que não podem duplicar).
+ * (vazio)  → 1 comando por unidade: é o comportamento que o comprador espera.
  */
 export function normalizeActionForQuantity(
   action: { quantityMode?: string; payload?: any },
@@ -175,20 +183,24 @@ export function normalizeActionForQuantity(
 ): { payload: any; repeat: number } {
   const qty = Math.max(1, Math.trunc(quantity || 1));
   const mode = action.quantityMode;
-  if (mode === "IGNORE" || !mode || mode === "MULTIPLY") {
-    if (mode === "MULTIPLY" && qty > 1 && action.payload && typeof action.payload === "object") {
-      const payload: any = { ...action.payload };
-      for (const k of ["amount", "value", "qty", "quantity", "count"]) {
-        if (typeof payload[k] === "number" && Number.isFinite(payload[k])) {
-          payload[k] = payload[k] * qty;
-        }
+  const payload = action.payload ?? {};
+
+  if (mode === "IGNORE") return { payload, repeat: 1 };
+
+  if (mode === "MULTIPLY" && qty > 1 && payload && typeof payload === "object") {
+    const multiplied: any = { ...payload };
+    let scaled = false;
+    for (const k of ["amount", "value", "qty", "quantity", "count"]) {
+      if (typeof multiplied[k] === "number" && Number.isFinite(multiplied[k])) {
+        multiplied[k] = multiplied[k] * qty;
+        scaled = true;
       }
-      return { payload, repeat: 1 };
     }
-    return { payload: action.payload ?? {}, repeat: 1 };
+    if (scaled) return { payload: multiplied, repeat: 1 };
   }
-  // REPEAT
-  return { payload: action.payload ?? {}, repeat: qty };
+
+  // REPEAT, MULTIPLY sem valores e o padrão do painel: por unidade.
+  return { payload, repeat: qty };
 }
 
 /**

@@ -795,10 +795,10 @@ export default function AdminProducts() {
                             >
                               <SelectTrigger><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="DEFAULT">Padrão (1x)</SelectItem>
-                                <SelectItem value="MULTIPLY">MULTIPLY</SelectItem>
-                                <SelectItem value="REPEAT">REPEAT</SelectItem>
-                                <SelectItem value="IGNORE">IGNORE</SelectItem>
+                                <SelectItem value="DEFAULT">Padrão (1 por unidade)</SelectItem>
+                                <SelectItem value="MULTIPLY">MULTIPLY (multiplica o payload)</SelectItem>
+                                <SelectItem value="REPEAT">REPEAT (1 por unidade)</SelectItem>
+                                <SelectItem value="IGNORE">IGNORE (sempre 1, sem repetir)</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -819,6 +819,11 @@ export default function AdminProducts() {
                             Executar com jogador offline
                           </label>
                         </div>
+                        <p className="text-xs text-muted-foreground">
+                          Quem compra 2 recebe 2: cada unidade vira uma entrega própria. Use{" "}
+                          <code className="rounded bg-muted px-1 font-mono">IGNORE</code> só em cargos/itens que
+                          devem ser entregues uma única vez, mesmo com quantidade maior.
+                        </p>
                         <div className="grid gap-3 rounded-lg bg-muted/30 p-3 sm:grid-cols-3">
                           <div>
                             <Label className="text-xs">Ação de reversão</Label>

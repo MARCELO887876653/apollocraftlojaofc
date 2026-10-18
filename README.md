@@ -73,6 +73,15 @@ Plataforma completa de e-commerce digital (estilo Central Cart) construída com 
 
 Com isso o botão **Entrar com Discord** aparece na tela de login (fluxo com PKCE + `state`). Quem entra pelo Discord tem nome e foto preenchidos automaticamente; se o e-mail for de um cliente que já comprou, a conta é **vinculada** em vez de duplicada. Em **Minha Conta** o cliente pode enviar, trocar ou remover a própria foto (JPG/PNG/WEBP/GIF até 5 MB) e vê o selo *Discord conectado*.
 
+## Loja "carregando para sempre"
+
+Se a loja abrir mas nenhum dado aparecer, o app agora pergunta ao deployment o motivo e mostra na tela:
+
+- **"desativado por limite de uso"** → o Convex pausou o deployment porque o limite configurado foi atingido. Nada é perdido: abra o [painel do Convex](https://dashboard.convex.dev) → *Deployment settings* → **Usage limits** e aumente ou desative o limite. O site volta sozinho (ele verifica o servidor a cada minuto e recarrega ao reconectar). Dica: este projeto publica usando um deployment **dev**, que tem limites menores — o ideal é criar um **production deployment** e apontar `VITE_CONVEX_URL` / `STORE_DEPLOYMENT_URL` para ele.
+- **"não foi possível conectar"** → rede, endereço errado ou build sem `VITE_CONVEX_URL`. O app também tenta sozinho a cada minuto.
+
+Enquanto a aba está aberta, o app faz uma verificação leve por minuto para manter a conexão acordada. Ao voltar para a aba depois de um tempo, ele revalida na hora — não é mais preciso recarregar na mão.
+
 ## Desenvolvimento
 
 ```bash

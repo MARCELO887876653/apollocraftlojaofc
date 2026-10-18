@@ -19,6 +19,14 @@
  */
 export const STORE_DEPLOYMENT_URL = "https://capable-akita-865.convex.cloud";
 
+/**
+ * Painel do Convex onde o limite de uso deste deployment é ajustado
+ * (Deployment → Settings → Usage limits). Usado na tela de erro quando o
+ * servidor é desativado automaticamente por estourar o limite.
+ */
+export const STORE_DASHBOARD_URL =
+  "https://dashboard.convex.dev/t/freebuff/7cf38cdf-8e08-4dcd-bfce-f72dfc8d2371/capable-akita-865";
+
 /** Formato de um endereço de deployment Convex. */
 const CONVEX_DEPLOYMENT = /^https:\/\/[a-z0-9-]+\.convex\.cloud$/i;
 

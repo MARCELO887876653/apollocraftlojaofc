@@ -31,7 +31,15 @@ import { CartProvider } from "@/lib/cart";
 // bundle principal. É o maior ganho de tempo de primeira pintura em celular.
 import Home from "./pages/Home.tsx";
 import { ThemeProvider } from "@/lib/theme";
-import { convexUrlCandidates, deploymentServesStore } from "@/lib/convex-url";
+import {
+  STORE_DASHBOARD_URL,
+  configuredConvexUrl,
+  convexUrlCandidates,
+} from "@/lib/convex-url";
+import {
+  checkDeployment,
+  type DeploymentFailure,
+} from "@/lib/deployment-status";
 import { applyShareMeta } from "@/lib/seo";
 import type { ShareMeta, ShareMetaTag } from "@/convex/lib/seo";
 
@@ -306,13 +314,23 @@ function useStoreReachable(client: ConvexReactClient): boolean {
   return reachable;
 }
 
+/** Tempo entre as verificações automáticas do servidor. */
+const RETRY_SECONDS = 60;
+
 /**
  * Última linha de defesa contra o "carrega para sempre".
  *
- * Se o endereço configurado no build não responde esta loja, o app tenta o
- * deployment dela (ver `@/lib/convex-url`) depois de alguns segundos. Se nem
- * esse responder, mostramos o endereço usado e a ação de recarregar — em vez do
- * spinner infinito em todas as telas.
+ * Três coisas acontecem aqui:
+ *
+ * 1. Ao abrir o site, um POST público pergunta ao deployment se ele está
+ *    executando as funções desta loja. Se a resposta for erro, a tela explica o
+ *    motivo (o caso real: "desativado por limite de uso") em vez de mandar o
+ *    dono conferir VITE_CONVEX_URL.
+ * 2. Enquanto o site está aberto e saudável, essa mesma pergunta roda a cada
+ *    minuto — é o "acordar" do servidor, que mantém a conexão/caches quentes.
+ * 3. Se o servidor cair ou voltar, o app tenta de novo sozinho a cada minuto e
+ *    recarrega a página no instante em que ele responde — sem o visitante
+ *    precisar fazer nada.
  */
 function ConnectionGuard({
   url,
@@ -326,58 +344,193 @@ function ConnectionGuard({
   const client = useConvex();
   const { isWebSocketConnected } = useConvexConnectionState();
   const reachable = useStoreReachable(client);
-  // O cliente pode ficar pendurado sem nunca responder (foi o caso do endereço
-  // errado). Um POST público no mesmo endereço responde em milissegundos se ele
-  // não é o deployment desta loja, então dá para trocar sem esperar conexão.
-  const [probeFailed, setProbeFailed] = useState(false);
+  const [failure, setFailure] = useState<DeploymentFailure | null>(null);
   const [timedOut, setTimedOut] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [retryIn, setRetryIn] = useState(RETRY_SECONDS);
+  const failures = useRef(0);
+  const recovered = useRef(false);
+  const reloading = useRef(false);
   const fired = useRef(false);
 
-  useEffect(() => {
-    if (!canFailover) return;
-    let alive = true;
-    void deploymentServesStore(url).then((serves) => {
-      if (alive && !serves) setProbeFailed(true);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [url, canFailover]);
+  const runCheck = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!options?.silent) setChecking(true);
+      const result = await checkDeployment(url);
+      setChecking(false);
 
+      if (result.ok) {
+        failures.current = 0;
+        setFailure(null);
+        setTimedOut(false);
+        // O servidor voltou depois de uma queda: recarrega uma única vez para
+        // reabrir as consultas que ficaram penduradas.
+        if (recovered.current && !reloading.current) {
+          reloading.current = true;
+          window.location.reload();
+        }
+        return;
+      }
+
+      failures.current += 1;
+      // Erro devolvido pelo próprio servidor é definitivo; falha de rede pode
+      // ser um soluço do celular, então só avisamos na segunda tentativa.
+      if (result.failure.kind !== "unreachable" || failures.current >= 2) {
+        // Só marcamos "recuperação pendente" quando o aviso realmente apareceu:
+        // assim um ping isolado que falha não provoca recarga da página.
+        recovered.current = true;
+        setFailure(result.failure);
+      }
+      if (canFailover) onFailover();
+    },
+    [url, canFailover, onFailover],
+  );
+
+  // Primeira verificação ao abrir o site.
   useEffect(() => {
-    if (reachable || fired.current) return;
-    // 0ms: o teste respondeu que este endereço não é a loja.
-    // 6s: o teste não acusou problema, mas nada chegou pelo cliente.
-    // 10s: não há para onde trocar — só avisamos depois de um tempo generoso.
-    const delay = probeFailed ? 0 : canFailover ? 6000 : 10000;
+    failures.current = 0;
+    recovered.current = false;
+    fired.current = false;
+    void runCheck();
+  }, [runCheck]);
+
+  // Se os dados chegaram, o servidor está claramente respondendo: some o aviso.
+  useEffect(() => {
+    if (!reachable) return;
+    setFailure(null);
+    setTimedOut(false);
+  }, [reachable]);
+
+  // Nada chegou pelo cliente em 10s e o teste HTTP não acusou nada: mostra a
+  // tela mesmo assim (backstop, para nunca ficar girando em silêncio).
+  useEffect(() => {
+    if (reachable || failure || fired.current) return;
     const timer = setTimeout(() => {
       fired.current = true;
-      if (canFailover) onFailover();
-      else setTimedOut(true);
-    }, delay);
+      setTimedOut(true);
+    }, 10000);
     return () => clearTimeout(timer);
-  }, [reachable, probeFailed, canFailover, onFailover]);
+  }, [reachable, failure]);
 
-  if (reachable || !timedOut) return null;
+  // Mantém o servidor acordado: uma pergunta por minuto enquanto a aba está
+  // aberta. Também é o que detecta uma queda depois que o site já carregou.
+  useEffect(() => {
+    if (!reachable) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void runCheck({ silent: true });
+    }, RETRY_SECONDS * 1000);
+    return () => window.clearInterval(timer);
+  }, [reachable, runCheck]);
+
+  // Volta para a aba ou para a internet: verifica na hora.
+  useEffect(() => {
+    const onBack = () => {
+      if (document.visibilityState === "visible") void runCheck({ silent: true });
+    };
+    document.addEventListener("visibilitychange", onBack);
+    window.addEventListener("online", onBack);
+    return () => {
+      document.removeEventListener("visibilitychange", onBack);
+      window.removeEventListener("online", onBack);
+    };
+  }, [runCheck]);
+
+  // Falhou: tenta de novo a cada minuto, mostrando a contagem.
+  const showing = Boolean(failure) || timedOut;
+  useEffect(() => {
+    if (!showing) return;
+    setRetryIn(RETRY_SECONDS);
+    const tick = window.setInterval(() => {
+      setRetryIn((s) => (s > 1 ? s - 1 : 0));
+    }, 1000);
+    const retry = window.setTimeout(() => void runCheck({ silent: true }), RETRY_SECONDS * 1000);
+    return () => {
+      window.clearInterval(tick);
+      window.clearTimeout(retry);
+    };
+  }, [showing, failure, runCheck]);
+
+  if (reachable && !failure) return null;
+  if (!showing) return null;
+
+  const usageLimit = failure?.kind === "usage-limit";
+  const missingUrl = !configuredConvexUrl(url);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background p-6 text-foreground">
-      <div className="max-w-md text-center">
-        <p className="text-sm font-semibold">Não foi possível conectar ao servidor de dados</p>
-        <p className="mt-2 text-xs break-words text-muted-foreground">
-          O endereço configurado no build é{" "}
-          <code className="font-mono text-[11px]">{url || "(VITE_CONVEX_URL ausente)"}</code>
-          {isWebSocketConnected ? " e a conexão caiu." : " e a conexão não foi estabelecida."}{" "}
-          Confira a variável <code className="font-mono text-[11px]">VITE_CONVEX_URL</code> e
-          publique de novo.
+      <div className="w-full max-w-lg text-center">
+        <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-amber-500/10 ring-1 ring-amber-500/25">
+          <span className="text-2xl">{usageLimit ? "⏸" : "⚠"}</span>
+        </span>
+        <p className="mt-4 text-lg font-bold tracking-tight">
+          {usageLimit
+            ? "O servidor da loja foi desativado por limite de uso"
+            : "Não foi possível conectar ao servidor de dados"}
         </p>
-        <button
-          type="button"
-          className="mt-5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent"
-          onClick={() => window.location.reload()}
-        >
-          Recarregar página
-        </button>
+
+        {usageLimit ? (
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            O Convex desativou este servidor porque o limite de uso configurado foi atingido.{" "}
+            <strong className="text-foreground">Seus dados estão salvos</strong> — pedidos,
+            produtos e configurações continuam intactos. Para a loja voltar, abra o painel do
+            Convex e aumente ou desative esse limite em{" "}
+            <em>Deployment settings → Usage limits</em>.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            {missingUrl
+              ? "Este build saiu sem a variável VITE_CONVEX_URL. Publique de novo com o endereço do deployment da loja."
+              : isWebSocketConnected
+                ? "A conexão com o servidor caiu."
+                : "O servidor não respondeu."}{" "}
+            A loja tenta de novo sozinha a cada minuto e recarrega quando ele voltar.
+          </p>
+        )}
+
+        {failure?.detail ? (
+          <pre className="mt-3 max-h-28 overflow-auto rounded-xl border border-border/70 bg-muted/40 p-3 text-left font-mono text-[11px] leading-4 text-muted-foreground">
+            {failure.detail}
+          </pre>
+        ) : null}
+
+        <p className="mt-3 text-[11px] break-words text-muted-foreground">
+          Servidor: <code className="font-mono">{url || "(VITE_CONVEX_URL ausente)"}</code>
+        </p>
+
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          {usageLimit && (
+            <a
+              href={STORE_DASHBOARD_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg bg-primary px-3.5 py-2 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              Abrir painel do Convex
+            </a>
+          )}
+          <button
+            type="button"
+            className="rounded-lg border border-border px-3.5 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50"
+            onClick={() => void runCheck()}
+            disabled={checking}
+          >
+            {checking ? "Verificando…" : "Tentar agora"}
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-border px-3.5 py-2 text-sm font-medium transition-colors hover:bg-accent"
+            onClick={() => window.location.reload()}
+          >
+            Recarregar página
+          </button>
+        </div>
+
+        <p className="mt-4 text-xs text-muted-foreground">
+          {checking
+            ? "Verificando o servidor…"
+            : `Verificando de novo em ${retryIn}s — a loja abre sozinha quando o servidor voltar.`}
+        </p>
       </div>
     </div>
   );

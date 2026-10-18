@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Search, Loader2, Ban, CheckCircle2, PackagePlus, RefreshCw, RotateCcw } from "lucide-react";
+import { Search, Loader2, Ban, CheckCircle2, PackagePlus, RefreshCw } from "lucide-react";
 
 type Order = {
   _id: string; number: string; customerName: string; customerEmail: string;
@@ -65,7 +65,6 @@ export default function AdminOrders() {
   const cancelOrder = useMutation(api.orders.adminCancel);
   const deliverManually = useMutation(api.orders.adminDeliverManually);
   const refreshPayment = useAction(api.payments.refreshPaymentStatus);
-  const retryCommand = useMutation(api.deliveryCommands.adminRetry);
   const redeliverCommand = useMutation(api.deliveryCommands.adminRedeliver);
   // Entregas automáticas (Minecraft) do pedido aberto — é o que o addon
   // consome; ficava invisível no detalhe do pedido.
@@ -152,30 +151,32 @@ export default function AdminOrders() {
     }
   };
 
-  const retryCommandById = async (id: string) => {
-    try {
-      await retryCommand({ id: id as any });
-      toast.success("Entrega reenviada para a fila");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Erro ao reenviar a entrega");
-    }
-  };
+  // Reenvio: o botão existe SEMPRE, em qualquer status da entrega (concluída,
+  // falhou, cancelada). Devolve a comando para a fila do addon como nova.
+  const [redeliveringId, setRedeliveringId] = useState<string | null>(null);
 
-  /** Reenvia uma entrega JÁ CONCLUÍDA (ex.: cliente comprou 2 e recebeu 1).
-   *  Cada reenvio entrega uma unidade a mais, por isso pede confirmação. */
-  const redeliverCommandById = async (id: string) => {
+  /** Reenvia a entrega (ex.: cliente comprou 2 e recebeu 1). Cada reenvio
+   *  entrega uma unidade a mais — por isso pede confirmação quando já saiu. */
+  const redeliverCommandById = async (id: string, status: string) => {
     if (
+      status === "DONE" &&
       !confirm(
         "Reenviar uma entrega já concluída? O jogador vai receber este item novamente. Use isso para repor uma unidade que faltou.",
       )
     ) {
       return;
     }
+    setRedeliveringId(id);
     try {
       await redeliverCommand({ id: id as any, confirm: true });
-      toast.success("Entrega reenviada — o addon vai entregar de novo");
+      toast.success("Reenviado — a entrega voltou para a fila do addon", {
+        description: "Acompanhe o status aqui: Pendente → Processando → Concluída.",
+      });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Erro ao reenviar a entrega");
+      const msg = e instanceof Error ? e.message : "Erro ao reenviar a entrega";
+      toast.error(msg.split("Uncaught Error:").pop()?.trim() || msg);
+    } finally {
+      setRedeliveringId(null);
     }
   };
 
@@ -545,9 +546,19 @@ export default function AdminOrders() {
                   </div>
                 )}
 
-                {commands && commands.length > 0 && (
-                  <div>
-                    <p className="mb-2 font-medium">Entregas automáticas</p>
+                <div>
+                  <p className="mb-2 font-medium">Entregas automáticas</p>
+                  {commands === undefined && (
+                    <div className="flex justify-center rounded-md border py-3">
+                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
+                  {commands?.length === 0 && (
+                    <p className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+                      Nenhuma entrega automática registrada para este pedido.
+                    </p>
+                  )}
+                  {commands && commands.length > 0 && (
                     <div className="space-y-1.5">
                       {commands.map((c) => (
                         <div key={c._id} className="rounded-md border px-3 py-2 text-xs">
@@ -564,35 +575,36 @@ export default function AdminOrders() {
                           {c.lastError && (
                             <p className="mt-1 text-red-600 dark:text-red-400">{c.lastError}</p>
                           )}
-                          {c.status === "DONE" ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="mt-1.5 h-7"
-                              onClick={() => redeliverCommandById(c._id)}
-                            >
-                              <RefreshCw className="mr-1 size-3" /> Reenviar (dar de novo)
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="mt-1.5 h-7"
-                              onClick={() => retryCommandById(c._id)}
-                            >
-                              <RotateCcw className="mr-1 size-3" /> Reenviar
-                            </Button>
-                          )}
+                          {/* Sempre visível: mesmo com a entrega já concluída o
+                              botão continua aqui para repor uma unidade. */}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-1.5 h-7"
+                            disabled={redeliveringId === c._id}
+                            onClick={() => redeliverCommandById(c._id, c.status)}
+                          >
+                            {redeliveringId === c._id ? (
+                              <Loader2 className="mr-1 size-3 animate-spin" />
+                            ) : (
+                              <RefreshCw className="mr-1 size-3" />
+                            )}
+                            Reenviar (dar de novo)
+                          </Button>
                         </div>
                       ))}
                     </div>
+                  )}
+                  {commands && commands.length > 0 && (
                     <p className="mt-2 text-xs text-muted-foreground">
                       Cliente recebeu menos do que comprou? Use{" "}
-                      <strong>Reenviar (dar de novo)</strong> na entrega — cada reenvio dá uma
-                      unidade extra no servidor.
+                      <strong>Reenviar (dar de novo)</strong> — cada reenvio dá uma
+                      unidade extra no servidor. Se ficar em {""}
+                      <strong>Pendente</strong> por muito tempo, o addon do servidor não
+                      está consultando a fila.
                     </p>
-                  </div>
-                )}
+                  )}
+                </div>
 
                 <div>
                   <p className="mb-2 font-medium">Histórico</p>

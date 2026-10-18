@@ -489,27 +489,46 @@ export const adminRetry = mutation({
   },
 });
 
-/** Reenvio forçado de uma entrega DONE (risco de duplicar — exige confirmação). */
+/**
+ * Devolve a entrega para a fila do addon, em QUALQUER status (inclusive
+ * DONE/CANCELED/FAILED). É o botão "Reenviar (dar de novo)" do pedido.
+ *
+ * Antes ele só trocava o status para PENDING: `attempts`, `lastError` e
+ * `requiresManualIntervention` ficavam como estavam, então uma entrega que já
+ * tinha esgotado as tentativas voltava "pendente" mas travada na prática.
+ * Agora a entrega volta como nova: 0 tentativas, sem erro anterior.
+ */
 export const adminRedeliver = mutation({
   args: { id: v.id("deliveryCommands"), confirm: v.boolean() },
   handler: async (ctx, { id, confirm }) => {
     const admin = await requireAdmin(ctx, "deliveries.manage");
-    if (!confirm) throw new Error("Confirmação obrigatória para reenviar uma entrega concluída.");
+    if (!confirm) throw new Error("Confirmação obrigatória para reenviar uma entrega.");
     const c = await ctx.db.get(id);
     if (!c) throw new Error("Entrega não encontrada");
+    const now = Date.now();
     await ctx.db.patch(id, {
       status: "PENDING",
-      executeAt: Date.now(),
+      executeAt: now,
       completedAt: undefined,
+      response: undefined,
+      reason: undefined,
+      lastError: undefined,
+      errorCode: undefined,
+      retryable: undefined,
+      requiresManualIntervention: false,
+      nextAttemptAt: undefined,
+      attempts: 0,
       claimedBy: undefined,
       claimedAt: undefined,
       claimExpiresAt: undefined,
       claimToken: undefined,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
     await logAudit(ctx, admin, "delivery_v1.redeliver_done", "deliveryCommands", id, {
       publicId: c.publicId,
+      fromStatus: c.status,
     });
+    return { ok: true as const };
   },
 });
 

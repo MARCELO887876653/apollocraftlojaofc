@@ -53,6 +53,7 @@ import type * as products from "../products.js";
 import type * as profile from "../profile.js";
 import type * as settings from "../settings.js";
 import type * as stats from "../stats.js";
+import type * as storefront from "../storefront.js";
 import type * as team from "../team.js";
 import type * as users from "../users.js";
 import type * as webhooksOut from "../webhooksOut.js";
@@ -111,6 +112,7 @@ declare const fullApi: ApiFromModules<{
   profile: typeof profile;
   settings: typeof settings;
   stats: typeof stats;
+  storefront: typeof storefront;
   team: typeof team;
   users: typeof users;
   webhooksOut: typeof webhooksOut;

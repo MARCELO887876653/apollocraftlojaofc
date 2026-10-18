@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { ProductCard } from "@/components/store/ProductCard";
 import { StoreLayout } from "@/components/store/StoreLayout";
 import { VisitTracker } from "@/components/store/VisitTracker";
+import { useHomeData, useStoreShell } from "@/lib/storefront";
 import { formatBRL } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -71,10 +72,8 @@ function Grid({ products }: { products: Product[] | undefined }) {
   );
 }
 
-function Hero() {
-  const store = useQuery(api.settings.getStore) as any;
-  const banners = useQuery(api.content.listBanners, { position: "hero", activeOnly: true }) as any[] | undefined;
-  const hero = banners?.[0];
+function Hero({ store, banner }: { store?: any; banner?: any }) {
+  const hero = banner;
   return (
     <section className="relative overflow-hidden border-b">
       {/* imagem de fundo configurável + overlay */}
@@ -226,8 +225,7 @@ function Benefits() {
 }
 
 /** Cards horizontais de categoria com glow — estilo vitrine. */
-function Categories() {
-  const categories = useQuery(api.categories.listPublic) as Category[] | undefined;
+function Categories({ categories }: { categories?: Category[] }) {
   if (!categories?.length) return null;
   return (
     <section className="border-b">
@@ -283,9 +281,7 @@ function Categories() {
 }
 
 /** Card "Conecte-se ao servidor" com IP copiável. */
-function ServerSection({ config }: { config?: any }) {
-  const store = useQuery(api.settings.getStore) as { serverIp?: string } | undefined;
-  const ip = store?.serverIp;
+function ServerSection({ config, ip }: { config?: any; ip?: string }) {
   if (!ip) return null;
 
   const copy = async () => {
@@ -361,8 +357,7 @@ const RANKS = [
   },
 ];
 
-function TopBuyers({ config }: { config?: any }) {
-  const buyers = useQuery(api.customers.topBuyers) as Buyer[] | undefined;
+function TopBuyers({ config, buyers }: { config?: any; buyers?: Buyer[] }) {
   if (!buyers?.length) return null;
 
   return (
@@ -455,8 +450,7 @@ function ProductSection({
   );
 }
 
-function FaqSection({ config }: { config?: any }) {
-  const faqs = useQuery(api.content.listFaqs, { activeOnly: true }) as any[] | undefined;
+function FaqSection({ config, faqs }: { config?: any; faqs?: any[] }) {
   if (!faqs?.length) return null;
   return (
     <section className="border-b">
@@ -502,7 +496,11 @@ function FaqSection({ config }: { config?: any }) {
 }
 
 export default function Home() {
-  const homepage = (useQuery(api.settings.getHomepage) as Section[] | undefined) ?? [];
+  // UMA chamada traz tudo o que a home mostra: ordem das seções, banner do
+  // topo, categorias, top 3 compradores e FAQ (antes eram 5 chamadas separadas).
+  const data = useHomeData();
+  const store = useStoreShell()?.store;
+  const homepage = (data?.homepage as Section[] | undefined) ?? [];
 
   return (
     <StoreLayout>
@@ -513,11 +511,11 @@ export default function Home() {
           const cfg = section.config ?? {};
           switch (section.type) {
             case "hero":
-              return <Hero key={section.id} />;
+              return <Hero key={section.id} banner={data?.banners?.[0]} store={store} />;
             case "benefits":
               return <Benefits key={section.id} />;
             case "categories":
-              return <Categories key={section.id} />;
+              return <Categories key={section.id} categories={data?.categories} />;
             case "featured":
               return <Featured key={section.id} config={cfg} />;
             case "promo":
@@ -527,11 +525,11 @@ export default function Home() {
             case "new":
               return <Newest key={section.id} config={cfg} />;
             case "server":
-              return <ServerSection key={section.id} config={cfg} />;
+              return <ServerSection key={section.id} config={cfg} ip={store?.serverIp} />;
             case "top3":
-              return <TopBuyers key={section.id} config={cfg} />;
+              return <TopBuyers key={section.id} config={cfg} buyers={data?.topBuyers} />;
             case "faq":
-              return <FaqSection key={section.id} config={cfg} />;
+              return <FaqSection key={section.id} config={cfg} faqs={data?.faqs} />;
             default:
               return null;
           }

@@ -1,6 +1,7 @@
-import { useQuery, useMutation } from "convex/react";
+import { useMutation } from "convex/react";
 import { useEffect, useRef } from "react";
 import { api } from "@/convex/_generated/api";
+import { useStoreShell } from "@/lib/storefront";
 
 type Theme = {
   primary: string;
@@ -30,16 +31,21 @@ function mix(fg: string, bg: string, amount: number): string {
  * background/card fica transparente e o conteúdo "vaza" por cima dos dialogs.
  */
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const theme = useQuery(api.settings.getTheme) as Theme | undefined;
+  // O tema vem do shell da loja (uma chamada para a loja inteira) em vez de uma
+  // assinatura própria por página.
+  const shell = useStoreShell();
+  const theme = shell?.theme as Theme | undefined;
   const applyBrand = useMutation(api.settings.applyBrand);
   const migrationDone = useRef(false);
 
-  // Garante que lojas antigas migrem para a identidade Apollo Craft (idempotente).
+  // Garante que lojas antigas migrem para a identidade Apollo Craft
+  // (idempotente). Só roda quando o SERVIDOR diz que ainda falta: antes esta
+  // mutation era chamada em toda visita, mesmo com a migração já aplicada.
   useEffect(() => {
-    if (!theme || migrationDone.current) return;
+    if (!shell?.brandMigrationPending || migrationDone.current) return;
     migrationDone.current = true;
     applyBrand({}).catch(() => {});
-  }, [theme, applyBrand]);
+  }, [shell?.brandMigrationPending, applyBrand]);
 
   useEffect(() => {
     if (!theme) return;

@@ -2,13 +2,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import {
-  ConvexReactClient,
-  useConvex,
-  useConvexConnectionState,
-  useQuery,
-} from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { ConvexReactClient, useConvexConnectionState } from "convex/react";
 import React, {
   StrictMode,
   useCallback,
@@ -40,8 +34,8 @@ import {
   checkDeployment,
   type DeploymentFailure,
 } from "@/lib/deployment-status";
+import { StoreShellProvider, useStoreShell } from "@/lib/storefront";
 import { applyShareMeta } from "@/lib/seo";
-import type { ShareMeta, ShareMetaTag } from "@/convex/lib/seo";
 
 // Preview/captura de tela do ambiente Freebuff: carregado SOMENTE em
 // desenvolvimento. Em produção este import dinâmico é eliminado pelo Vite
@@ -205,12 +199,18 @@ function ConvexApp({ children }: { children: React.ReactNode }) {
 
   return (
     <ConvexAuthProvider key={url} client={client}>
-      <ConnectionGuard
-        url={url}
-        canFailover={attempt < CONVEX_URLS.length - 1}
-        onFailover={failover}
-      />
-      {children}
+      {/* Um único `useQuery` do shell da loja alimenta layout, tema, favicon e
+          bio do link — antes eram 6 assinaturas (e 3 do mesmo `getStore`).
+          O ConnectionGuard fica DENTRO do provider para usar a chegada dos
+          dados como sinal de vida, sem uma assinatura só para isso. */}
+      <StoreShellProvider>
+        <ConnectionGuard
+          url={url}
+          canFailover={attempt < CONVEX_URLS.length - 1}
+          onFailover={failover}
+        />
+        {children}
+      </StoreShellProvider>
     </ConvexAuthProvider>
   );
 }
@@ -222,10 +222,8 @@ function ConvexApp({ children }: { children: React.ReactNode }) {
  * embutida no projeto.
  */
 function StoreFavicon() {
-  const store = useQuery(api.settings.getStore) as
-    | { logoUrl?: string; faviconUrl?: string }
-    | undefined;
-  const iconUrl = store?.faviconUrl || store?.logoUrl;
+  const shell = useStoreShell();
+  const iconUrl = shell?.store?.faviconUrl || shell?.store?.logoUrl;
 
   useEffect(() => {
     if (!iconUrl) return;
@@ -274,48 +272,30 @@ function StoreFavicon() {
  * navegador, sem esperar a próxima publicação.
  */
 function StoreShareMeta() {
-  const data = useQuery(api.settings.getShareMeta) as
-    | { meta: ShareMeta; tags: ShareMetaTag[] }
-    | undefined;
+  const shareMeta = useStoreShell()?.shareMeta;
 
   useEffect(() => {
-    if (!data) return;
-    applyShareMeta(data.meta, data.tags);
-  }, [data]);
+    if (!shareMeta) return;
+    applyShareMeta(shareMeta.meta, shareMeta.tags);
+  }, [shareMeta]);
 
   return null;
 }
 
-/**
- * Diz se o deployment conectado realmente serve esta loja, observando uma query
- * pública conhecida: `settings.getStore` sempre devolve um objeto no backend
- * certo, e `localQueryResult()` lança quando o servidor responde erro. É o que
- * distingue "ainda carregando" de "este endereço não é a loja" — inclusive
- * quando o WebSocket conecta mas as funções não existem do outro lado.
- */
-function useStoreReachable(client: ConvexReactClient): boolean {
-  const [reachable, setReachable] = useState(false);
-
-  useEffect(() => {
-    const watch = client.watchQuery(api.settings.getStore, {});
-    const check = () => {
-      try {
-        if (watch.localQueryResult() !== undefined) setReachable(true);
-      } catch {
-        // Erro do servidor nesta query: segue indisponível e deixa o
-        // ConnectionGuard cuidar (troca de endereço ou aviso).
-      }
-    };
-    check();
-    const unsubscribe = watch.onUpdate(check);
-    return () => unsubscribe();
-  }, [client]);
-
-  return reachable;
-}
-
 /** Tempo entre as verificações automáticas do servidor. */
 const RETRY_SECONDS = 60;
+
+/**
+ * Quanto esperar antes de desconfiar do servidor.
+ *
+ * Não perguntamos nada enquanto os dados não atrasam: o "shell" da loja
+ * (`storefront.getShell`, assinado pelo StoreShellProvider) é o sinal de vida.
+ * Se ele chegou, o servidor está respondendo — e nenhuma chamada extra é feita.
+ */
+const SUSPECT_AFTER_MS = 5000;
+
+/** Último recurso: nada chegou e nem o teste HTTP acusou nada. */
+const GIVE_UP_AFTER_MS = 15000;
 
 /**
  * Última linha de defesa contra o "carrega para sempre".
@@ -341,9 +321,10 @@ function ConnectionGuard({
   canFailover: boolean;
   onFailover: () => void;
 }) {
-  const client = useConvex();
+  // Os dados da loja chegaram? É o próprio shell respondendo — sem assinatura
+  // extra só para conferir se o servidor está vivo.
+  const reachable = useStoreShell() !== undefined;
   const { isWebSocketConnected } = useConvexConnectionState();
-  const reachable = useStoreReachable(client);
   const [failure, setFailure] = useState<DeploymentFailure | null>(null);
   const [timedOut, setTimedOut] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -386,13 +367,17 @@ function ConnectionGuard({
     [url, canFailover, onFailover],
   );
 
-  // Primeira verificação ao abrir o site.
+  // Ao abrir o site não perguntamos nada: dá tempo de o shell chegar. Só depois
+  // de SUSPECT_AFTER_MS sem dados é que vale gastar uma chamada para descobrir
+  // o motivo (servidor fora, limite de uso, endereço errado…).
   useEffect(() => {
+    if (reachable) return;
     failures.current = 0;
     recovered.current = false;
     fired.current = false;
-    void runCheck();
-  }, [runCheck]);
+    const timer = window.setTimeout(() => void runCheck(), SUSPECT_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [reachable, runCheck]);
 
   // Se os dados chegaram, o servidor está claramente respondendo: some o aviso.
   useEffect(() => {
@@ -401,14 +386,14 @@ function ConnectionGuard({
     setTimedOut(false);
   }, [reachable]);
 
-  // Nada chegou pelo cliente em 10s e o teste HTTP não acusou nada: mostra a
-  // tela mesmo assim (backstop, para nunca ficar girando em silêncio).
+  // Nada chegou pelo cliente e o teste HTTP não acusou nada: mostra a tela
+  // mesmo assim (backstop, para nunca ficar girando em silêncio).
   useEffect(() => {
     if (reachable || failure || fired.current) return;
     const timer = setTimeout(() => {
       fired.current = true;
       setTimedOut(true);
-    }, 10000);
+    }, GIVE_UP_AFTER_MS);
     return () => clearTimeout(timer);
   }, [reachable, failure]);
 

@@ -2,6 +2,7 @@ import { useQuery } from "convex/react";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { api } from "@/convex/_generated/api";
+import { useStoreShell } from "@/lib/storefront";
 import { useCart } from "@/lib/cart";
 import { cn } from "@/lib/utils";
 import { MaintenanceGate } from "@/components/store/MaintenanceGate";
@@ -29,8 +30,10 @@ type Store = {
 type MenuItem = { label: string; url: string; newTab?: boolean };
 
 export function StoreLayout({ children }: { children: React.ReactNode }) {
-  const store = useQuery(api.settings.getStore) as Store | undefined;
-  const menu = useQuery(api.settings.getMenu) as MenuItem[] | undefined;
+  // Loja e menu vêm do shell (1 chamada compartilhada por toda a vitrine).
+  const shell = useStoreShell();
+  const store = shell?.store as Store | undefined;
+  const menu = shell?.menu as MenuItem[] | undefined;
   // A equipe (admin ativo) continua navegando durante a manutenção para poder
   // desligá-la pelo painel; clientes veem a tela de manutenção.
   // A consulta à equipe só é feita quando a loja está em manutenção: fora disso

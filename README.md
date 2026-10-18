@@ -82,6 +82,17 @@ Se a loja abrir mas nenhum dado aparecer, o app agora pergunta ao deployment o m
 
 Com a loja **sem dados**, o app pergunta ao servidor a cada minuto e recarrega sozinho no instante em que ele volta a responder. Com a loja saudável **não existe verificação periódica** — a conexão aberta já mantém tudo aquecido e cada pergunta extra contaria como chamada de função (o mesmo recurso que o limite mede). Ao voltar para a aba depois de um tempo, ele revalida na hora.
 
+## Consumo de chamadas (limite do Convex)
+
+O plano mede **chamadas de função** (query/mutation/action), e cada `useQuery` é uma chamada. Para não gastar cota à toa:
+
+- A vitrine lê **dois pacotes** em vez de dezenas de consultas soltas: `storefront.getShell` (loja, tema, menu e bio do link — um `useQuery` compartilhado por um provider) e `storefront.getHome` (seções, banner, categorias, top 3 e FAQ). Abrir a home saiu de ~16 chamadas para ~3.
+- O tema **não** chama mais `settings.applyBrand` em toda visita: o servidor diz em `getShell` se a migração ainda falta.
+- O guard de conexão usa a chegada do shell como sinal de vida e só faz um teste HTTP quando os dados atrasam — com a loja saudável, zero chamadas extras.
+- O contador de visitas (`stats.trackVisit`) registra 1 por sessão do navegador, não por página.
+
+Ao criar novas telas, prefira ler de um pacote existente (ou acrescentar campos a ele) em vez de somar mais um `useQuery`.
+
 ## Desenvolvimento
 
 ```bash

@@ -58,21 +58,31 @@ export const handle = action({
       );
     }
 
-    // ── 1. Autenticação ──
+    // ── 1. Autenticação + rate limit + último uso + log amostrado ──
     if (!token) {
       return fail(401, "MISSING_API_KEY", "Cabeçalho Authorization com Bearer token ausente.");
     }
-    const key = await ctx.runQuery(internal.apiKeysV1.internalFindByHash, {
+    const isWrite = method !== "GET";
+    const limit = isWrite ? WRITE_LIMIT : GET_LIMIT;
+    const bucket = isWrite ? "write" : "read";
+
+    const auth = await ctx.runMutation(internal.apiV1Data.internalAuthorize, {
       hash: sha256Hex(token),
+      bucket,
+      limit,
+      windowMs: WINDOW_MS,
+      method,
+      path,
+      ip,
     });
-    if (!key) {
-      return fail(401, "INVALID_API_KEY", "Chave de API inválida.");
+    if (!auth.ok) {
+      return auth.code === "API_KEY_REVOKED"
+        ? fail(401, "API_KEY_REVOKED", "Esta chave de API foi revogada ou desativada.")
+        : fail(401, "INVALID_API_KEY", "Chave de API inválida.");
     }
+    const key = auth.key;
     if (!token.startsWith("sk_live_") || key.prefix !== tokenPrefix(token)) {
       return fail(401, "INVALID_API_KEY", "Chave de API inválida.");
-    }
-    if (!key.active || key.revokedAt) {
-      return fail(401, "API_KEY_REVOKED", "Esta chave de API foi revogada ou desativada.");
     }
 
     // ── 2. Rota ──
@@ -83,14 +93,13 @@ export const handle = action({
     const rest = isApp ? afterV1.slice(1) : afterV1;
     const route = rest.join("/");
 
-    const isWrite = method !== "GET";
-    const limit = isWrite ? WRITE_LIMIT : GET_LIMIT;
-    const bucket = isWrite ? "write" : "read";
-
     const log = async (statusCode: number, error?: string, deliveryId?: string) => {
+      // Sucesso não é logado: a autorização já grava 1 amostra por minuto.
+      // Só erros (>= 400) entram em `apiLogs`, que é o que interessa no painel.
+      if (statusCode < 400) return;
       try {
         await ctx.runMutation(internal.apiV1Data.internalLog, {
-          apiKeyId: key._id,
+          apiKeyId: key.id,
           serverId: key.serverId,
           addonId: key.addonId,
           deliveryId,
@@ -111,13 +120,8 @@ export const handle = action({
       return fail(404, "NOT_FOUND", `Rota desconhecida: ${path}`);
     }
 
-    // ── 3. Rate limit (por chave + bucket) ──
-    const rl = await ctx.runMutation(internal.apiV1Data.internalCheckRateLimit, {
-      apiKeyId: key._id,
-      bucket,
-      limit,
-      windowMs: WINDOW_MS,
-    });
+    // ── 3. Rate limit (já aplicado na autorização; headers abaixo) ──
+    const rl = auth.rate;
     const rlHeaders: Record<string, string> = {
       "X-RateLimit-Limit": String(rl.limit),
       "X-RateLimit-Remaining": String(rl.remaining),
@@ -171,8 +175,7 @@ export const handle = action({
     try {
       // ── GET /me — handshake da integração (usado no botão "Testar conexão") ──
       if (route === "me" && method === "GET") {
-        await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-        await log(200);
+                await log(200);
         const canWriteCatalog = scopes.some(
           (s) => s.startsWith("products:") || s.startsWith("categories:"),
         );
@@ -186,7 +189,7 @@ export const handle = action({
             api_version: "v1",
             authenticated: true,
             key: {
-              id: String(key._id),
+              id: String(key.id),
               name: key.name,
               // nunca o token completo nem o hash
               prefix: key.prefix,
@@ -229,8 +232,7 @@ export const handle = action({
           limit: limitN,
           now: Date.now(),
         });
-        await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-        await log(200);
+                await log(200);
         return ok(data, rlHeaders);
       }
 
@@ -249,13 +251,12 @@ export const handle = action({
         const addonFilter = effectiveAddonId ?? (body.addon_id || undefined);
         const limitN = Math.min(Number(body.limit) || 20, 100);
         const claimed = await ctx.runMutation(internal.apiV1Data.internalClaim, {
-          apiKeyId: key._id,
+          apiKeyId: key.id,
           serverId: effectiveServerId,
           addonId: addonFilter,
           limit: limitN,
         });
-        await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-        await log(200);
+                await log(200);
         return ok({ data: claimed, count: claimed.length }, rlHeaders);
       }
 
@@ -317,7 +318,7 @@ export const handle = action({
           errorCode: body.error_code ? String(body.error_code).slice(0, 64) : undefined,
           retryable: typeof body.retryable === "boolean" ? body.retryable : undefined,
           claimToken: body.claim_token ? String(body.claim_token) : undefined,
-          apiKeyId: key._id,
+          apiKeyId: key.id,
           serverId: effectiveServerId,
           addonId: effectiveAddonId,
         });
@@ -338,8 +339,7 @@ export const handle = action({
           await log(404, "not found", deliveryId);
           return fail(404, "DELIVERY_NOT_FOUND", "Entrega não encontrada.", rlHeaders);
         }
-        await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-        await log(200, undefined, deliveryId);
+                await log(200, undefined, deliveryId);
         return ok(
           {
             id: deliveryId,
@@ -378,14 +378,13 @@ export const handle = action({
           errorCode: body.error_code ? String(body.error_code) : undefined,
           ip,
         });
-        await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-        await log(200);
+                await log(200);
         return ok({ ...result, server_id: serverId, online: true }, rlHeaders);
       }
 
       // ─── Catálogo pela API (categorias / produtos / receita / imagens) ───
       const catMeta = {
-        apiKeyId: String(key._id),
+        apiKeyId: String(key.id),
         keyName: key.name,
         serverId: effectiveServerId,
         addonId: effectiveAddonId,
@@ -406,7 +405,7 @@ export const handle = action({
       const idemReplay = async (): Promise<ApiResult | null> => {
         if (!idempotencyKey) return null;
         const prior = await ctx.runQuery(internal.apiV1Data.internalIdempotencyGet, {
-          apiKeyId: key._id,
+          apiKeyId: key.id,
           key: idempotencyKey,
         });
         if (!prior) return null;
@@ -424,7 +423,7 @@ export const handle = action({
         if (!idempotencyKey) return;
         try {
           await ctx.runMutation(internal.apiV1Data.internalIdempotencyStore, {
-            apiKeyId: key._id,
+            apiKeyId: key.id,
             key: idempotencyKey,
             method,
             endpoint: path,
@@ -492,8 +491,7 @@ export const handle = action({
             data: parsed.value,
             meta: catMeta,
           });
-          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          const statusCode = res.created ? 201 : 200;
+                    const statusCode = res.created ? 201 : 200;
           await idemStore(statusCode, res.category, String((res.category as any)?.id ?? ""));
           await log(statusCode);
           return { status: statusCode, body: res.category, headers: rlHeaders };
@@ -510,8 +508,7 @@ export const handle = action({
             data: parsed.value,
             meta: catMeta,
           });
-          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          const statusCode = res.idempotent ? 200 : 201;
+                    const statusCode = res.idempotent ? 200 : 201;
           await idemStore(statusCode, res.category, String((res.category as any)?.id ?? ""));
           await log(statusCode);
           return { status: statusCode, body: res.category, headers: rlHeaders };
@@ -536,8 +533,7 @@ export const handle = action({
             data: parsed.value,
             meta: catMeta,
           });
-          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          await log(200);
+                    await log(200);
           return ok(res.category, rlHeaders);
         }
 
@@ -548,8 +544,7 @@ export const handle = action({
             ref,
             meta: catMeta,
           });
-          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          await log(200);
+                    await log(200);
           return ok(res, rlHeaders);
         }
       }
@@ -578,8 +573,7 @@ export const handle = action({
             data: parsed.value,
             meta: catMeta,
           });
-          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          const statusCode = res.created ? 201 : 200;
+                    const statusCode = res.created ? 201 : 200;
           await idemStore(statusCode, res.product, String((res.product as any)?.id ?? ""));
           await log(statusCode);
           return { status: statusCode, body: res.product, headers: rlHeaders };
@@ -596,8 +590,7 @@ export const handle = action({
             data: parsed.value,
             meta: catMeta,
           });
-          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          const statusCode = res.idempotent ? 200 : 201;
+                    const statusCode = res.idempotent ? 200 : 201;
           await idemStore(statusCode, res.product, String((res.product as any)?.id ?? ""));
           await log(statusCode);
           return { status: statusCode, body: res.product, headers: rlHeaders };
@@ -624,8 +617,7 @@ export const handle = action({
               recipe: parsed.value,
               meta: catMeta,
             });
-            await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-            await log(200);
+                        await log(200);
             return ok(res, rlHeaders);
           }
         }
@@ -639,8 +631,7 @@ export const handle = action({
             publish: rest[2] === "publish",
             meta: catMeta,
           });
-          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          await log(200);
+                    await log(200);
           return ok(res.product, rlHeaders);
         }
 
@@ -663,8 +654,7 @@ export const handle = action({
             data: parsed.value,
             meta: catMeta,
           });
-          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          await log(200);
+                    await log(200);
           return ok(res.product, rlHeaders);
         }
 
@@ -675,8 +665,7 @@ export const handle = action({
             ref,
             meta: catMeta,
           });
-          await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-          await log(200);
+                    await log(200);
           return ok(res, rlHeaders);
         }
       }
@@ -693,8 +682,7 @@ export const handle = action({
           cursor,
           limit: limitN,
         });
-        await ctx.runMutation(internal.apiKeysV1.internalTouchKey, { id: key._id });
-        await log(200);
+                await log(200);
         return ok(data, rlHeaders);
       }
 

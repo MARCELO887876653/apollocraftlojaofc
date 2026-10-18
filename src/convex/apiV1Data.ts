@@ -82,6 +82,108 @@ export const internalCheckRateLimit = internalMutation({
   },
 });
 
+// ─── Autorização em UMA chamada ───
+//
+// Antes cada requisição da API custava 4 idas ao banco separadas (buscar a
+// chave, rate limit, touch da chave e log). O addon consulta a fila a cada
+// poucos segundos, então eram ~7 execuções por poll. Aqui tudo acontece numa
+// mutation só; o log de sucesso é amostrado (1 por janela de 1 minuto) para
+// não encher a tabela `apiLogs` com polls vazios.
+
+export const internalAuthorize = internalMutation({
+  args: {
+    hash: v.string(),
+    bucket: v.string(),
+    limit: v.number(),
+    windowMs: v.number(),
+    method: v.string(),
+    path: v.string(),
+    ip: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const key = await ctx.db
+      .query("apiKeysV1")
+      .withIndex("by_hash", (q) => q.eq("keyHash", args.hash))
+      .first();
+    if (!key) return { ok: false as const, code: "INVALID_API_KEY" as const };
+    if (!key.active || key.revokedAt) {
+      return { ok: false as const, code: "API_KEY_REVOKED" as const };
+    }
+
+    // Rate limit por chave + bucket (mesma regra de antes).
+    const rlKey = `apiv1:${key._id}:${args.bucket}`;
+    const doc = await ctx.db
+      .query("rateLimits")
+      .withIndex("by_key", (q) => q.eq("key", rlKey))
+      .first();
+
+    let newWindow = false;
+    let rate: {
+      allowed: boolean;
+      remaining: number;
+      limit: number;
+      retryAfterSec: number;
+    };
+    if (!doc || now - doc.windowStart >= args.windowMs) {
+      newWindow = true;
+      if (doc) await ctx.db.patch(doc._id, { windowStart: now, count: 1 });
+      else await ctx.db.insert("rateLimits", { key: rlKey, windowStart: now, count: 1 });
+      rate = { allowed: true, remaining: args.limit - 1, limit: args.limit, retryAfterSec: 0 };
+    } else if (doc.count >= args.limit) {
+      rate = {
+        allowed: false,
+        remaining: 0,
+        limit: args.limit,
+        retryAfterSec: Math.max(1, Math.ceil((doc.windowStart + args.windowMs - now) / 1000)),
+      };
+    } else {
+      await ctx.db.patch(doc._id, { count: doc.count + 1 });
+      rate = {
+        allowed: true,
+        remaining: Math.max(0, args.limit - (doc.count + 1)),
+        limit: args.limit,
+        retryAfterSec: 0,
+      };
+    }
+
+    // lastUsedAt no máximo 1x por minuto (evita escrita a cada poll).
+    if (!key.lastUsedAt || now - key.lastUsedAt > 60_000) {
+      await ctx.db.patch(key._id, { lastUsedAt: now });
+    }
+
+    // Log amostrado: 1 por janela, em vez de 1 por requisição.
+    if (rate.allowed && newWindow) {
+      await ctx.db.insert("apiLogs", {
+        apiKeyId: key._id,
+        serverId: key.serverId,
+        addonId: key.addonId,
+        endpoint: args.path,
+        method: args.method,
+        statusCode: 200,
+        durationMs: 0,
+        ip: args.ip,
+        createdAt: now,
+      });
+    }
+
+    return {
+      ok: true as const,
+      key: {
+        id: key._id,
+        name: key.name,
+        prefix: key.prefix,
+        lastFour: key.lastFour,
+        scopes: key.scopes,
+        serverId: key.serverId,
+        addonId: key.addonId,
+        createdAt: key.createdAt,
+      },
+      rate,
+    };
+  },
+});
+
 // ─── Claim/lease atômico ───
 
 function visibleServers(serverId: string): string[] {

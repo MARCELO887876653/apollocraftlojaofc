@@ -139,6 +139,14 @@ describe("volta do Discord", () => {
   test("sem código é erro (o Discord não devolveu nada)", () => {
     const result = readDiscordCallback("");
     expect(result.kind).toBe("error");
+    expect(result.kind === "error" && result.message).toContain("sem os dados da volta do Discord");
+    expect(result.kind === "error" && result.missing).toBe(true);
+  });
+
+  test("voltou com parâmetro mas sem código: não é o caso de página vazia", () => {
+    const result = readDiscordCallback("?state=abc");
+    expect(result.kind).toBe("error");
     expect(result.kind === "error" && result.message).toContain("código de acesso");
+    expect(result.kind === "error" && result.missing).toBe(false);
   });
 });

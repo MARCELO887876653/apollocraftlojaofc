@@ -1,18 +1,25 @@
 import { useAuthActions } from "@convex-dev/auth/react";
+import { useQuery } from "convex/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { api } from "@/convex/_generated/api";
 import { discordRedirectUri } from "@/convex/lib/discord";
 import { useStoreShell } from "@/lib/storefront";
 import {
+  DISCORD_DEFAULT_RETURN_TO,
   attemptMatchesState,
   clearDiscordAttempt,
+  createDiscordAttempt,
   readDiscordAttempt,
   readDiscordCallback,
+  saveDiscordAttempt,
 } from "@/lib/discord-auth";
 import logoMark from "@/assets/logo.svg";
 import { AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
+
+type PublicDiscord = { enabled: boolean; clientId: string | null } | undefined;
 
 /**
  * Volta do Discord (`/auth/discord?code=…&state=…`).
@@ -21,6 +28,11 @@ import { AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
  * Convex Auth) confere as credenciais salvas no painel, lê o perfil e cria
  * ou vincula a conta da loja. Esta página só cuida do `state`/PKCE e do
  * caminho de volta.
+ *
+ * Quando o `code` não chega (página reaberta, endereço de retorno diferente do
+ * registrado no Discord, sessão do navegador perdida), a tela não é um beco sem
+ * saída: ela mostra o endereço que o Discord precisa devolver e oferece o
+ * próprio botão para recomeçar o login.
  */
 export default function DiscordCallbackPage() {
   const [searchParams] = useSearchParams();
@@ -28,7 +40,10 @@ export default function DiscordCallbackPage() {
   const navigate = useNavigate();
   // Nome e logo vêm do shell da loja (sem consulta extra nesta tela).
   const store = useStoreShell()?.store as { name?: string; logoUrl?: string } | undefined;
+  const discord = useQuery(api.discordAuth.getPublicConfig) as PublicDiscord;
   const [error, setError] = useState<string | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   // StrictMode monta o componente duas vezes em desenvolvimento; o código do
   // Discord só pode ser trocado UMA vez, então a troca roda só na primeira.
   const started = useRef(false);
@@ -36,6 +51,7 @@ export default function DiscordCallbackPage() {
   const finish = useCallback(async () => {
     const callback = readDiscordCallback(searchParams.toString());
     if (callback.kind !== "code") {
+      setMissing(callback.kind === "error" && callback.missing === true);
       setError(callback.message);
       return;
     }
@@ -72,6 +88,25 @@ export default function DiscordCallbackPage() {
     void finish();
   }, [finish]);
 
+  // Recomeça o login daqui mesmo, sem obrigar a pessoa a achar a tela de entrada.
+  const restart = async () => {
+    if (!discord?.clientId) return;
+    setRestarting(true);
+    try {
+      const { url, attempt } = await createDiscordAttempt({
+        clientId: discord.clientId,
+        origin: window.location.origin,
+        returnTo: readDiscordAttempt(sessionStorage)?.returnTo ?? DISCORD_DEFAULT_RETURN_TO,
+      });
+      saveDiscordAttempt(sessionStorage, attempt);
+      window.location.assign(url);
+    } catch {
+      setRestarting(false);
+    }
+  };
+
+  const canRestart = Boolean(discord?.enabled && discord.clientId);
+  const redirectUri = discordRedirectUri(window.location.origin);
   const storeName = store?.name ?? "Apollo Craft";
 
   return (
@@ -117,7 +152,38 @@ export default function DiscordCallbackPage() {
                   <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
                   {error}
                 </p>
-                <Button asChild className="w-full" size="lg">
+
+                {missing && (
+                  // Sem código não há como entrar: o navegador abriu este
+                  // endereço direto (link salvo, recarregou a página, ou o
+                  // Discord devolveu para outro endereço registrado).
+                  <div className="w-full rounded-xl border bg-muted/40 p-3 text-left">
+                    <p className="text-xs font-semibold">Endereço de retorno esperado</p>
+                    <code className="mt-1 block truncate font-mono text-[11px] text-muted-foreground">
+                      {redirectUri}
+                    </code>
+                    <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                      Precisa estar registrado, exatamente assim, em Discord Developer Portal →
+                      OAuth2 → Redirects.
+                    </p>
+                  </div>
+                )}
+
+                {canRestart && (
+                  <Button
+                    className="w-full bg-[#5865F2] text-white hover:bg-[#4752c4]"
+                    size="lg"
+                    onClick={() => void restart()}
+                    disabled={restarting}
+                  >
+                    {restarting ? (
+                      <Loader2 className="mr-2 size-4 animate-spin" />
+                    ) : null}
+                    {restarting ? "Abrindo o Discord…" : "Entrar com Discord"}
+                  </Button>
+                )}
+
+                <Button asChild variant={canRestart ? "outline" : "default"} className="w-full" size="lg">
                   <Link to="/auth">
                     <ArrowLeft className="mr-2 size-4" />
                     Voltar para o login

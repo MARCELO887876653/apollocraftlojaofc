@@ -238,7 +238,9 @@ export const testCredentials = action({
       const me = (await meRes.json()) as { application?: { name?: string; id?: string } };
       return {
         ok: true,
-        message: `Credenciais válidas${me.application?.name ? ` — aplicativo "${me.application.name}"` : ""}.`,
+        // Aviso explícito: este teste NÃO valida o endereço de retorno — foi
+        // exatamente o que fez "Testar credenciais" passar com o login quebrado.
+        message: `Credenciais válidas${me.application?.name ? ` — aplicativo "${me.application.name}"` : ""}. O login ainda depende do endereço de retorno registrado em OAuth2 → Redirects.`,
         application: me.application?.name ?? null,
         applicationId: me.application?.id ?? null,
       };

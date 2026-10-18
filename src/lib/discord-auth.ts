@@ -103,7 +103,8 @@ export function clearDiscordAttempt(storage: Storage) {
 export type DiscordCallback =
   | { kind: "code"; code: string; state: string | null }
   | { kind: "cancelled"; message: string }
-  | { kind: "error"; message: string };
+  /** `missing` = a URL voltou sem NENHUM parâmetro (nem erro, nem código). */
+  | { kind: "error"; message: string; missing?: boolean };
 
 /** Traduz a query string devolvida pelo Discord (sempre em pt-BR). */
 export function readDiscordCallback(search: string): DiscordCallback {
@@ -121,9 +122,16 @@ export function readDiscordCallback(search: string): DiscordCallback {
   }
   const code = params.get("code");
   if (!code) {
+    // Sem parâmetro nenhum: o navegador abriu /auth/discord direto (link
+    // antigo, recarregou a página, ou o Discord devolveu para outro endereço
+    // registrado). Dizemos isso em vez de culpar o Discord pelo código.
+    const empty = [...params.keys()].length === 0;
     return {
       kind: "error",
-      message: "O Discord não devolveu o código de acesso. Toque em \"Entrar com Discord\" novamente.",
+      missing: empty,
+      message: empty
+        ? "Esta página abriu sem os dados da volta do Discord — o login não chegou a ser concluído nesta aba."
+        : "O Discord não devolveu o código de acesso. Toque em \"Entrar com Discord\" novamente.",
     };
   }
   return { kind: "code", code, state: params.get("state") };

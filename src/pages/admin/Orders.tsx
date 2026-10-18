@@ -66,6 +66,7 @@ export default function AdminOrders() {
   const deliverManually = useMutation(api.orders.adminDeliverManually);
   const refreshPayment = useAction(api.payments.refreshPaymentStatus);
   const retryCommand = useMutation(api.deliveryCommands.adminRetry);
+  const redeliverCommand = useMutation(api.deliveryCommands.adminRedeliver);
   // Entregas automáticas (Minecraft) do pedido aberto — é o que o addon
   // consome; ficava invisível no detalhe do pedido.
   const commands = useQuery(
@@ -123,6 +124,24 @@ export default function AdminOrders() {
     try {
       await retryCommand({ id: id as any });
       toast.success("Entrega reenviada para a fila");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao reenviar a entrega");
+    }
+  };
+
+  /** Reenvia uma entrega JÁ CONCLUÍDA (ex.: cliente comprou 2 e recebeu 1).
+   *  Cada reenvio entrega uma unidade a mais, por isso pede confirmação. */
+  const redeliverCommandById = async (id: string) => {
+    if (
+      !confirm(
+        "Reenviar uma entrega já concluída? O jogador vai receber este item novamente. Use isso para repor uma unidade que faltou.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await redeliverCommand({ id: id as any, confirm: true });
+      toast.success("Entrega reenviada — o addon vai entregar de novo");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erro ao reenviar a entrega");
     }
@@ -513,7 +532,16 @@ export default function AdminOrders() {
                           {c.lastError && (
                             <p className="mt-1 text-red-600 dark:text-red-400">{c.lastError}</p>
                           )}
-                          {c.status !== "DONE" && (
+                          {c.status === "DONE" ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="mt-1.5 h-7"
+                              onClick={() => redeliverCommandById(c._id)}
+                            >
+                              <RefreshCw className="mr-1 size-3" /> Reenviar (dar de novo)
+                            </Button>
+                          ) : (
                             <Button
                               variant="outline"
                               size="sm"
@@ -526,6 +554,11 @@ export default function AdminOrders() {
                         </div>
                       ))}
                     </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Cliente recebeu menos do que comprou? Use{" "}
+                      <strong>Reenviar (dar de novo)</strong> na entrega — cada reenvio dá uma
+                      unidade extra no servidor.
+                    </p>
                   </div>
                 )}
 

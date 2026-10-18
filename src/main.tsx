@@ -326,11 +326,11 @@ const RETRY_SECONDS = 60;
  *    executando as funções desta loja. Se a resposta for erro, a tela explica o
  *    motivo (o caso real: "desativado por limite de uso") em vez de mandar o
  *    dono conferir VITE_CONVEX_URL.
- * 2. Enquanto o site está aberto e saudável, essa mesma pergunta roda a cada
- *    minuto — é o "acordar" do servidor, que mantém a conexão/caches quentes.
- * 3. Se o servidor cair ou voltar, o app tenta de novo sozinho a cada minuto e
- *    recarrega a página no instante em que ele responde — sem o visitante
- *    precisar fazer nada.
+ * 2. A mesma pergunta é repetida a cada minuto ENQUANTO o site está sem dados
+ *    (é o "acordar" da loja) — e para de rodar assim que os dados chegam, para
+ *    não gastar chamadas de função do Convex sem necessidade.
+ * 3. No instante em que o servidor volta a responder, a página recarrega
+ *    sozinha — sem o visitante precisar fazer nada.
  */
 function ConnectionGuard({
   url,
@@ -412,21 +412,36 @@ function ConnectionGuard({
     return () => clearTimeout(timer);
   }, [reachable, failure]);
 
-  // Mantém o servidor acordado: uma pergunta por minuto enquanto a aba está
-  // aberta. Também é o que detecta uma queda depois que o site já carregou.
+  // NÃO perguntamos nada enquanto o site está saudável: cada pergunta é uma
+  // chamada de função e o limite do Convex é medido em chamadas. A conexão
+  // aberta (WebSocket) já mantém o servidor aquecido sozinha.
+  //
+  // A verificação só liga quando a conexão cai (ou quando a aba volta com a
+  // conexão perdida): é o "acordar" que faz a loja voltar sozinha, sem gastar
+  // nada enquanto está tudo bem.
   useEffect(() => {
-    if (!reachable) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
+    if (isWebSocketConnected) return;
+    let cancelled = false;
+    const attempt = () => {
+      if (cancelled || document.visibilityState !== "visible") return;
       void runCheck({ silent: true });
-    }, RETRY_SECONDS * 1000);
-    return () => window.clearInterval(timer);
-  }, [reachable, runCheck]);
+    };
+    // 10s: dá tempo de o próprio cliente reconectar antes de incomodar.
+    const first = window.setTimeout(attempt, 10000);
+    const repeat = window.setInterval(attempt, RETRY_SECONDS * 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(first);
+      window.clearInterval(repeat);
+    };
+  }, [isWebSocketConnected, runCheck]);
 
-  // Volta para a aba ou para a internet: verifica na hora.
+  // Volta para a aba ou para a internet com algo pendente: verifica na hora.
   useEffect(() => {
     const onBack = () => {
-      if (document.visibilityState === "visible") void runCheck({ silent: true });
+      if (document.visibilityState !== "visible") return;
+      if (isWebSocketConnected && reachable && !failure) return;
+      void runCheck({ silent: true });
     };
     document.addEventListener("visibilitychange", onBack);
     window.addEventListener("online", onBack);
@@ -434,7 +449,7 @@ function ConnectionGuard({
       document.removeEventListener("visibilitychange", onBack);
       window.removeEventListener("online", onBack);
     };
-  }, [runCheck]);
+  }, [runCheck, isWebSocketConnected, reachable, failure]);
 
   // Falhou: tenta de novo a cada minuto, mostrando a contagem.
   const showing = Boolean(failure) || timedOut;

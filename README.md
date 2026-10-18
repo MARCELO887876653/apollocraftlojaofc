@@ -80,7 +80,7 @@ Se a loja abrir mas nenhum dado aparecer, o app agora pergunta ao deployment o m
 - **"desativado por limite de uso"** → o Convex pausou o deployment porque o limite configurado foi atingido. Nada é perdido: abra o [painel do Convex](https://dashboard.convex.dev) → *Deployment settings* → **Usage limits** e aumente ou desative o limite. O site volta sozinho (ele verifica o servidor a cada minuto e recarrega ao reconectar). Dica: este projeto publica usando um deployment **dev**, que tem limites menores — o ideal é criar um **production deployment** e apontar `VITE_CONVEX_URL` / `STORE_DEPLOYMENT_URL` para ele.
 - **"não foi possível conectar"** → rede, endereço errado ou build sem `VITE_CONVEX_URL`. O app também tenta sozinho a cada minuto.
 
-Enquanto a aba está aberta, o app faz uma verificação leve por minuto para manter a conexão acordada. Ao voltar para a aba depois de um tempo, ele revalida na hora — não é mais preciso recarregar na mão.
+Com a loja **sem dados**, o app pergunta ao servidor a cada minuto e recarrega sozinho no instante em que ele volta a responder. Com a loja saudável **não existe verificação periódica** — a conexão aberta já mantém tudo aquecido e cada pergunta extra contaria como chamada de função (o mesmo recurso que o limite mede). Ao voltar para a aba depois de um tempo, ele revalida na hora.
 
 ## Desenvolvimento
 

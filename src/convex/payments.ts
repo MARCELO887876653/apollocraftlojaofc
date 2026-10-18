@@ -104,39 +104,96 @@ export const createPixPayment = action({
 
 // ─── Consultar status no gateway (polling do cliente) ───
 
+/**
+ * Consulta o pagamento no Mercado Pago.
+ *
+ * Antes esta action desistia cedo (`paymentStatus !== "pending"`) e devolvia o
+ * status do banco: no painel, "Verificar no gateway" num pedido já pago não
+ * consultava nada e o botão parecia travado/sem efeito. Agora ela SEMPRE fala
+ * com o gateway quando existe cobrança, e diz explicitamente o que aconteceu
+ * (sem cobrança, gateway não configurado, resposta de erro, valor diferente).
+ */
 export const refreshPaymentStatus = action({
   args: { orderId: v.id("orders") },
   handler: async (ctx: any, { orderId }: { orderId: any }) => {
     const order: any = await ctx.runQuery(dataApi().internalGetOrder, { id: orderId });
-    if (!order?.gatewayPaymentId || order.paymentStatus !== "pending") {
-      return { status: order?.paymentStatus ?? "unknown" };
+    if (!order) throw new Error("Pedido não encontrado");
+
+    if (!order.gatewayPaymentId) {
+      return {
+        status: order.paymentStatus ?? "unknown",
+        checked: false as const,
+        gatewayStatus: null,
+        amountMatches: null,
+      };
     }
-    return await syncGatewayPayment(ctx, order.gatewayPaymentId, order._id);
+
+    const config = await getGatewayConfig(ctx);
+    const token = resolveToken(config);
+    if (!token) {
+      throw new Error(
+        "Mercado Pago não está configurado. Informe o Access Token em Integrações → Mercado Pago para conferir o pagamento no gateway.",
+      );
+    }
+
+    const res = await syncGatewayPayment(ctx, order.gatewayPaymentId, order._id, token);
+    if (!res.configured) {
+      throw new Error("Mercado Pago não está configurado nesta loja.");
+    }
+    if (res.httpStatus) {
+      throw new Error(
+        `O Mercado Pago respondeu ${res.httpStatus} para esta cobrança. Confira o Access Token e o ID do pagamento.`,
+      );
+    }
+
+    const amountMatches =
+      res.amountApproved === null ? null : res.amountApproved === order.totalCents;
+
+    return {
+      status: res.status,
+      previousStatus: order.paymentStatus,
+      checked: true as const,
+      gatewayStatus: res.mpStatus ?? null,
+      amountMatches,
+    };
   },
 });
 
-async function syncGatewayPayment(ctx: any, gatewayPaymentId: string, orderId?: any) {
-  const config = await getGatewayConfig(ctx);
-  const token = resolveToken(config);
-  if (!token) return { status: "pending" };
+async function syncGatewayPayment(
+  ctx: any,
+  gatewayPaymentId: string,
+  orderId?: any,
+  tokenOverride?: string,
+) {
+  const token = tokenOverride ?? resolveToken(await getGatewayConfig(ctx));
+  if (!token) return { status: "pending", configured: false, httpStatus: 0, mpStatus: null, amountApproved: null };
 
   const res = await fetch(`${MP_API}/v1/payments/${gatewayPaymentId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) return { status: "pending" };
+  // Um erro do gateway não pode ser lido como "ainda pendente": quem chamou
+  // precisa saber que a consulta falhou.
+  if (!res.ok) {
+    return { status: "pending", configured: true, httpStatus: res.status, mpStatus: null, amountApproved: null };
+  }
   const data = await res.json();
   const mpStatus = mapMpStatus(data.status);
+  const amountApproved =
+    typeof data.transaction_amount === "number" ? Math.round(data.transaction_amount * 100) : null;
   if (orderId) {
     await ctx.runMutation(dataApi().applyGatewayStatus, {
       gatewayPaymentId,
       mpStatus,
-      amountApproved:
-        typeof data.transaction_amount === "number"
-          ? Math.round(data.transaction_amount * 100)
-          : undefined,
+      amountApproved: amountApproved ?? undefined,
     });
   }
-  return { status: mpStatus };
+  return {
+    status: mpStatus,
+    configured: true,
+    httpStatus: 0,
+    mpStatus: data.status ?? null,
+    amountApproved,
+  };
 }
 
 function mapMpStatus(status: string | undefined): string {

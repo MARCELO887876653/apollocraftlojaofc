@@ -103,19 +103,51 @@ export default function AdminOrders() {
 
   const checkGateway = async (id: string) => {
     setBusy("gateway");
+    let timer: number | undefined;
     try {
-      const res = (await refreshPayment({ orderId: id as any })) as { status: string };
+      // A consulta fala com o Mercado Pago; se ele não responder, o botão não
+      // pode ficar girando para sempre.
+      const res = (await Promise.race([
+        refreshPayment({ orderId: id as any }),
+        new Promise<never>((_, reject) => {
+          timer = window.setTimeout(
+            () => reject(new Error("O gateway não respondeu em 25s. Tente de novo.")),
+            25_000,
+          );
+        }),
+      ])) as {
+        status: string;
+        previousStatus?: string;
+        checked?: boolean;
+        gatewayStatus?: string | null;
+        amountMatches?: boolean | null;
+      };
+
+      if (!res.checked) {
+        toast.info("Este pedido não tem cobrança no gateway (pagamento manual).");
+        return;
+      }
+
+      const changed = res.previousStatus !== res.status;
       const labels: Record<string, string> = {
-        paid: "Pagamento aprovado no gateway — pedido atualizado",
-        pending: "O gateway ainda não registrou o pagamento",
+        paid: changed
+          ? "Pagamento aprovado no gateway — pedido atualizado"
+          : "O gateway confirma: pagamento aprovado",
+        pending: "O gateway ainda não registrou o pagamento (PIX em aberto)",
         cancelled: "O gateway informa pagamento cancelado",
         failed: "O gateway recusou o pagamento",
         refunded: "O gateway informa pagamento reembolsado",
       };
-      toast.success(labels[res?.status] ?? `Status no gateway: ${res?.status}`);
+      toast.success(labels[res.status] ?? `Status no gateway: ${res.status}`);
+      if (res.amountMatches === false && res.status === "paid") {
+        toast.warning("Atenção: o valor pago no gateway é diferente do total do pedido.");
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Erro ao consultar o gateway");
+      const msg = e instanceof Error ? e.message : "Erro ao consultar o gateway";
+      // Convex embrulha o erro numa mensagem longa — mostra só o final útil.
+      toast.error(msg.split("Uncaught Error:").pop()?.trim() || msg);
     } finally {
+      if (timer) window.clearTimeout(timer);
       setBusy(null);
     }
   };

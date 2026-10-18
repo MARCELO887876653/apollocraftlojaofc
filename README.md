@@ -86,7 +86,14 @@ Com a loja **sem dados**, o app pergunta ao servidor a cada minuto e recarrega s
 
 O plano mede **chamadas de função** (query/mutation/action), e cada `useQuery` é uma chamada. Para não gastar cota à toa:
 
-- A vitrine lê **dois pacotes** em vez de dezenas de consultas soltas: `storefront.getShell` (loja, tema, menu e bio do link — um `useQuery` compartilhado por um provider) e `storefront.getHome` (seções, banner, categorias, top 3 e FAQ). Abrir a home saiu de ~16 chamadas para ~3.
+- A vitrine lê **pacotes** em vez de dezenas de consultas soltas:
+  - `storefront.getShell` — loja, tema, menu e bio do link (um `useQuery` compartilhado por um provider; usado por toda página, inclusive login e checkout);
+  - `storefront.getHome` — seções, banner, categorias, top 3 e FAQ;
+  - `storefront.getCategoryPage` — categoria, subcategorias e produtos (+1 chamada por troca de subcategoria);
+  - `storefront.getProductPage` — produto, variações, categoria e relacionados (sem a ida-e-volta extra dos relacionados).
+
+  Abrir a home saiu de ~16 chamadas para ~3; categoria e produto, de 4 para 3 (e sem cascata).
+- As regras de leitura (filtros, ordem, subcategorias) vivem em `src/convex/lib/storefrontData.ts`, usadas tanto pelo catálogo quanto pelos pacotes — nada de duplicar regra. Os testes em `src/convex/__tests__/storefront.test.ts` comparam os pacotes com as consultas antigas.
 - O tema **não** chama mais `settings.applyBrand` em toda visita: o servidor diz em `getShell` se a migração ainda falta.
 - O guard de conexão usa a chegada do shell como sinal de vida e só faz um teste HTTP quando os dados atrasam — com a loja saudável, zero chamadas extras.
 - O contador de visitas (`stats.trackVisit`) registra 1 por sessão do navegador, não por página.

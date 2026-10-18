@@ -139,21 +139,35 @@ export default function CategoryPage() {
   const { slug = "" } = useParams();
   const [subSlug, setSubSlug] = useState<string | null>(null);
 
-  const categories = (useQuery(api.categories.listPublic) as Category[] | undefined) ?? [];
-  const category = categories.find((c) => c.slug === slug);
-  const subs = categories.filter((c) => c.parentId === category?._id);
-  const selectedSlug = subSlug ?? slug;
-  const selected = categories.find((c) => c.slug === selectedSlug) ?? category;
+  // UMA chamada traz a categoria, as subcategorias (chips) e os produtos dela.
+  // Antes eram duas: todas as categorias + os produtos.
+  const data = useQuery(api.storefront.getCategoryPage, {
+    slug,
+    subSlug: subSlug ?? undefined,
+  }) as
+    | {
+        category: Category | null;
+        subs: Category[];
+        selectedSlug: string;
+        products: Product[];
+      }
+    | undefined;
 
-  const products = useQuery(
-    api.products.listActive,
-    selected ? { categoryId: selected._id as any, sort: "relevance", limit: 60 } : "skip",
-  ) as any[] | undefined;
+  const category = data?.category ?? null;
+  const subs = data?.subs ?? [];
+  const selectedSlug = data?.selectedSlug ?? slug;
+  const products = data?.products;
 
   return (
     <StoreLayout>
       <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:py-12">
-        {!categories ? null : !category ? (
+        {data === undefined ? (
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="aspect-[3/4] animate-pulse rounded-2xl bg-muted/60" />
+            ))}
+          </div>
+        ) : !category ? (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed p-16 text-center text-muted-foreground">
             <Package className="size-10 opacity-40" />
             Categoria não encontrada.

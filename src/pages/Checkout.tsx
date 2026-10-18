@@ -1,8 +1,9 @@
 import { useMemo, useState, useEffect } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { Link, useNavigate } from "react-router";
 import { motion } from "framer-motion";
 import { api } from "@/convex/_generated/api";
+import { useStoreShell } from "@/lib/storefront";
 import { StoreLayout } from "@/components/store/StoreLayout";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/hooks/use-auth";
@@ -20,7 +21,8 @@ type Store = { name: string; checkoutFields: Array<{ key: string; label: string;
 export default function CheckoutPage() {
   const cart = useCart();
   const navigate = useNavigate();
-  const store = useQuery(api.settings.getStore) as Store | undefined;
+  // Campos do checkout vêm do shell da loja (sem consulta extra).
+  const store = useStoreShell()?.store as Store | undefined;
   const createOrder = useMutation(api.orders.create);
 
   const fields = store?.checkoutFields?.filter((f) => f.enabled) ?? [];

@@ -43,6 +43,7 @@ import type * as lib_deliveryRecipe from "../lib/deliveryRecipe.js";
 import type * as lib_discord from "../lib/discord.js";
 import type * as lib_hash from "../lib/hash.js";
 import type * as lib_seo from "../lib/seo.js";
+import type * as lib_storefrontData from "../lib/storefrontData.js";
 import type * as logs from "../logs.js";
 import type * as maintenance from "../maintenance.js";
 import type * as maintenanceEmails from "../maintenanceEmails.js";
@@ -102,6 +103,7 @@ declare const fullApi: ApiFromModules<{
   "lib/discord": typeof lib_discord;
   "lib/hash": typeof lib_hash;
   "lib/seo": typeof lib_seo;
+  "lib/storefrontData": typeof lib_storefrontData;
   logs: typeof logs;
   maintenance: typeof maintenance;
   maintenanceEmails: typeof maintenanceEmails;

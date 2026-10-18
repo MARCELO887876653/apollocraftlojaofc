@@ -17,6 +17,7 @@ import {
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
+import { useStoreShell } from "@/lib/storefront";
 import { DiscordIcon } from "@/components/icons/DiscordIcon";
 import { createDiscordAttempt, saveDiscordAttempt } from "@/lib/discord-auth";
 import logoMark from "@/assets/logo.svg";
@@ -54,9 +55,10 @@ type StoreBrand = { name?: string; logoUrl?: string };
 
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
-  // Logo enviado pela loja (Configurações → Loja). Enquanto ele não chega,
-  // mostramos a marca Apollo embutida no projeto.
-  const store = useQuery(api.settings.getStore) as StoreBrand | undefined;
+  // Logo enviado pela loja (Configurações → Loja). Vem do shell da loja — a
+  // mesma chamada compartilhada por toda a vitrine, sem consulta extra.
+  // Enquanto ele não chega, mostramos a marca Apollo embutida no projeto.
+  const store = useStoreShell()?.store as StoreBrand | undefined;
   // O botão do Discord só aparece quando o dono da loja liga a integração
   // (Painel → Discord). `clientId` é público: vai na URL de autorização.
   const discord = useQuery(api.discordAuth.getPublicConfig) as

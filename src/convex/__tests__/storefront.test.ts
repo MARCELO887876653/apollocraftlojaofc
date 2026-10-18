@@ -116,6 +116,205 @@ describe("storefront.getShell — dados da loja inteira em 1 chamada", () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────
+// Páginas de categoria e de produto: 1 chamada em vez de 2.
+//
+// O teste compara com as consultas antigas (`products.listActive`,
+// `getBySlug`, `listRelated`) usando os MESMOS dados — se um dia as regras
+// divergirem, a vitrine mostraria uma coisa e o catálogo outra.
+// ─────────────────────────────────────────────────────────────
+
+async function seedCatalog(t: T) {
+  return await t.run(async (ctx) => {
+    const now = Date.now();
+    const parent = await ctx.db.insert("categories", {
+      name: "KITS",
+      slug: "kits",
+      order: 0,
+      active: true,
+    });
+    const sub = await ctx.db.insert("categories", {
+      name: "VIP",
+      slug: "vip",
+      parentId: parent,
+      order: 1,
+      active: true,
+    });
+    const other = await ctx.db.insert("categories", {
+      name: "Outra",
+      slug: "outra",
+      order: 2,
+      active: true,
+    });
+    await ctx.db.insert("categories", {
+      name: "Inativa",
+      slug: "inativa",
+      order: 3,
+      active: false,
+    });
+
+    const mk = async (
+      name: string,
+      slug: string,
+      categoryId: typeof parent,
+      order: number,
+      extra: Record<string, unknown> = {},
+    ) =>
+      await ctx.db.insert("products", {
+        name,
+        slug,
+        categoryId,
+        images: [],
+        tags: [],
+        priceCents: 1000 + order,
+        stock: 5,
+        unlimitedStock: false,
+        active: true,
+        featured: false,
+        popular: false,
+        hidden: false,
+        minQty: 1,
+        maxQty: 99,
+        order,
+        benefits: [],
+        salesCount: 0,
+        delivery: { type: "none", showToCustomer: true },
+        createdAt: now,
+        updatedAt: now,
+        ...extra,
+      });
+
+    const parentProduct = await mk("Kit do pai", "kit-pai", parent, 0);
+    const subProduct = await mk("Kit do VIP", "kit-vip", sub, 1);
+    const otherProduct = await mk("Outro item", "outro-item", other, 2);
+    await mk("Escondido", "escondido", parent, 3, { hidden: true });
+    await mk("Inativo", "inativo", parent, 4, { active: false });
+
+    await ctx.db.insert("productVariants", {
+      productId: parentProduct,
+      name: "30 dias",
+      priceCents: 1500,
+      stock: 3,
+      unlimitedStock: false,
+      order: 1,
+      active: true,
+    });
+    await ctx.db.insert("productVariants", {
+      productId: parentProduct,
+      name: "Desativada",
+      priceCents: 999,
+      stock: 3,
+      unlimitedStock: false,
+      order: 2,
+      active: false,
+    });
+
+    return { parent, sub, other, parentProduct, subProduct, otherProduct };
+  });
+}
+
+describe("storefront.getCategoryPage — categoria em 1 chamada", () => {
+  test("resolve a categoria, as subcategorias ativas e os produtos da categoria", async () => {
+    const t = convexTest(schema, modules);
+    const ids = await seedCatalog(t);
+
+    const page = await t.query(api.storefront.getCategoryPage, { slug: "kits" });
+    expect(page.category?.name).toBe("KITS");
+    expect(page.subs.map((s) => s.name)).toEqual(["VIP"]);
+    expect(page.selectedSlug).toBe("kits");
+
+    // Mesmos produtos que a consulta antiga devolvia para essa categoria
+    // (inclui subcategorias, ignora inativos e ocultos).
+    const legacy = await t.query(api.products.listActive, {
+      categoryId: ids.parent,
+      sort: "relevance",
+      limit: 60,
+    });
+    expect(page.products.map((p) => p.slug)).toEqual(legacy.map((p) => p.slug));
+    expect(page.products.map((p) => p.slug)).toEqual(["kit-pai", "kit-vip"]);
+  });
+
+  test("escolher uma subcategoria troca só os produtos, mantendo os chips", async () => {
+    const t = convexTest(schema, modules);
+    const ids = await seedCatalog(t);
+
+    const page = await t.query(api.storefront.getCategoryPage, {
+      slug: "kits",
+      subSlug: "vip",
+    });
+    expect(page.category?.name).toBe("KITS");
+    expect(page.selectedSlug).toBe("vip");
+    expect(page.subs.map((s) => s.name)).toEqual(["VIP"]);
+
+    const legacy = await t.query(api.products.listActive, {
+      categoryId: ids.sub,
+      sort: "relevance",
+      limit: 60,
+    });
+    expect(page.products.map((p) => p.slug)).toEqual(legacy.map((p) => p.slug));
+    expect(page.products.map((p) => p.slug)).toEqual(["kit-vip"]);
+  });
+
+  test("slug inexistente ou inativo devolve vazio (e a tela mostra 'não encontrada')", async () => {
+    const t = convexTest(schema, modules);
+    await seedCatalog(t);
+
+    for (const slug of ["nao-existe", "inativa"]) {
+      const page = await t.query(api.storefront.getCategoryPage, { slug });
+      expect(page.category).toBeNull();
+      expect(page.products).toEqual([]);
+      expect(page.subs).toEqual([]);
+    }
+  });
+
+  test("subcategoria de outra categoria é ignorada (não mostra produto errado)", async () => {
+    const t = convexTest(schema, modules);
+    await seedCatalog(t);
+
+    const page = await t.query(api.storefront.getCategoryPage, {
+      slug: "outra",
+      subSlug: "vip",
+    });
+    expect(page.selectedSlug).toBe("outra");
+    expect(page.products.map((p) => p.slug)).toEqual(["outro-item"]);
+  });
+});
+
+describe("storefront.getProductPage — produto em 1 chamada", () => {
+  test("produto, variações ativas e relacionados iguais às consultas antigas", async () => {
+    const t = convexTest(schema, modules);
+    const ids = await seedCatalog(t);
+
+    const page = await t.query(api.storefront.getProductPage, { slug: "kit-pai" });
+    expect(page?.product._id).toBe(ids.parentProduct);
+    expect(page?.category?.slug).toBe("kits");
+    // só variações ativas, na ordem definida
+    expect(page?.variants.map((v) => v.name)).toEqual(["30 dias"]);
+
+    const legacyProduct = await t.query(api.products.getBySlug, { slug: "kit-pai" });
+    expect(page?.product).toEqual(legacyProduct?.product);
+    expect(page?.variants).toEqual(legacyProduct?.variants);
+
+    const legacyRelated = await t.query(api.products.listRelated, {
+      productId: ids.parentProduct,
+      categoryId: ids.parent,
+      limit: 4,
+    });
+    expect(page?.related.map((p) => p.slug)).toEqual(legacyRelated.map((p) => p.slug));
+    // o próprio produto não aparece como relacionado
+    expect(page?.related.some((p) => p._id === ids.parentProduct)).toBe(false);
+  });
+
+  test("produto inexistente, inativo ou oculto devolve null", async () => {
+    const t = convexTest(schema, modules);
+    await seedCatalog(t);
+
+    for (const slug of ["nao-existe", "inativo", "escondido"]) {
+      expect(await t.query(api.storefront.getProductPage, { slug })).toBeNull();
+    }
+  });
+});
+
 describe("storefront.getHome — a home em 1 chamada", () => {
   test("banner só da posição hero e só ativo", async () => {
     const t = convexTest(schema, modules);

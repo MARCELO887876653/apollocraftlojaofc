@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { motion } from "framer-motion";
-import { Link, useNavigate, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { StoreLayout } from "@/components/store/StoreLayout";
 import { useCart } from "@/lib/cart";
 import { formatBRL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ProductCard } from "@/components/store/ProductCard";
 import { ShoppingBag, ShoppingCart, Zap, Plus, Minus } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 type Variant = {
   _id: string;
@@ -34,8 +32,11 @@ export default function ProductPage() {
   const { slug = "" } = useParams();
   const navigate = useNavigate();
   const cart = useCart();
-  const data = useQuery(api.products.getBySlug, { slug }) as
-    | { product: any; variants: Variant[]; category: any }
+  // UMA chamada traz produto, variações, categoria e relacionados. Antes os
+  // relacionados só eram pedidos depois que o produto chegava (ida e volta a
+  // mais em toda visita).
+  const data = useQuery(api.storefront.getProductPage, { slug }) as
+    | { product: any; variants: Variant[]; category: any; related: any[] }
     | null
     | undefined;
   const [variantId, setVariantId] = useState<string>("");
@@ -52,10 +53,7 @@ export default function ProductPage() {
   const product = data?.product;
   const variants = data?.variants ?? [];
 
-  const related = useQuery(
-    api.products.listRelated,
-    product ? { productId: product._id, categoryId: product.categoryId, limit: 4 } : "skip",
-  ) as any[] | undefined;
+  const related = data?.related;
 
   const selectedVariant = useMemo(
     () => variants.find((v) => v._id === variantId) ?? null,

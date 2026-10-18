@@ -113,11 +113,29 @@ if (typeof window !== "undefined") {
   else window.setTimeout(prefetchStoreRoutes, 1500);
 }
 
-// Simple loading fallback for route transitions
+/**
+ * Enquanto o chunk de uma rota lazy baixa, mostramos um esqueleto com a cara
+ * da loja (topo + título + grade de produtos) em vez de um "Loading..." solto:
+ * a página não salta de layout quando o conteúdo entra.
+ */
 function RouteLoading() {
+  const shell = useStoreShell();
+  const storeName = shell?.store?.name ?? "Apollo Craft";
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-pulse text-muted-foreground">Loading...</div>
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="flex h-16 items-center border-b border-border/60 px-4">
+        <span className="text-sm font-extrabold tracking-tight uppercase">{storeName}</span>
+      </div>
+      <div className="mx-auto w-full max-w-7xl px-4 py-12" aria-busy="true" aria-live="polite">
+        <span className="sr-only">Carregando a página…</span>
+        <div className="h-10 w-2/3 max-w-md animate-pulse rounded-xl bg-muted/60" />
+        <div className="mt-4 h-5 w-1/2 max-w-sm animate-pulse rounded bg-muted/40" />
+        <div className="mt-10 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="aspect-[3/4] animate-pulse rounded-2xl bg-muted/40" />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

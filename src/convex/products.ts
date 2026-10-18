@@ -1,28 +1,21 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
-import { slugify } from "./lib/data";
 import { applyProductUpdate, createProductRecord } from "./lib/catalog";
 import { deliveryV1Validator } from "./lib/apiSchema";
 import { assertDeliveryV1Valid } from "./lib/deliveryRecipe";
+import {
+  readActiveProducts,
+  readProductBySlug,
+  readRelatedProducts,
+  withCategoryNames,
+} from "./lib/storefrontData";
 
 // ─── Público ───
-
-/**
- * Anexa o nome da categoria a cada produto. Faz isso no servidor uma única vez
- * por consulta, evitando que cada card da vitrine abra a própria assinatura de
- * categorias no cliente (a home chega a renderizar dezenas de cards).
- */
-async function withCategoryNames(ctx: any, products: any[]) {
-  const ids = new Set(products.map((p) => p.categoryId).filter(Boolean));
-  if (ids.size === 0) return products;
-  const categories = await ctx.db.query("categories").collect();
-  const byId = new Map<any, string>(categories.map((c: any) => [c._id, c.name]));
-  return products.map((p) => ({
-    ...p,
-    categoryName: p.categoryId ? byId.get(p.categoryId) : undefined,
-  }));
-}
+//
+// As leituras ficam em lib/storefrontData.ts porque as páginas da vitrine
+// (storefront.getCategoryPage / getProductPage) devolvem os mesmos dados numa
+// chamada só — e precisam usar exatamente estas regras.
 
 export const listActive = query({
   args: {
@@ -31,62 +24,8 @@ export const listActive = query({
     sort: v.optional(v.union(v.literal("relevance"), v.literal("price_asc"), v.literal("price_desc"), v.literal("newest"))),
     limit: v.optional(v.number()),
   },
-  handler: async (ctx, { categoryId, search, sort, limit }) => {
-    let products;
-    if (categoryId) {
-      // inclui a categoria e todas as suas subcategorias (recursivo)
-      const allCats = await ctx.db.query("categories").collect();
-      const include = new Set<any>([categoryId]);
-      let frontier: any[] = [categoryId];
-      while (frontier.length) {
-        const next: any[] = [];
-        for (const c of allCats) {
-          if (c.parentId && frontier.includes(c.parentId) && !include.has(c._id)) {
-            include.add(c._id);
-            next.push(c._id);
-          }
-        }
-        frontier = next;
-      }
-      // Consulta apenas os produtos das categorias envolvidas (índice
-      // by_category) em vez de varrer a tabela inteira de produtos.
-      const perCategory = await Promise.all(
-        [...include].map((id) =>
-          ctx.db
-            .query("products")
-            .withIndex("by_category", (q) => q.eq("categoryId", id))
-            .collect(),
-        ),
-      );
-      products = perCategory.flat();
-    } else {
-      products = await ctx.db.query("products").collect();
-    }
-    let list = products.filter((p) => p.active && !p.hidden);
-    if (search) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (p) =>
-          p.name.toLowerCase().includes(s) ||
-          p.shortDescription?.toLowerCase().includes(s) ||
-          p.tags.some((t) => t.toLowerCase().includes(s)),
-      );
-    }
-    switch (sort) {
-      case "price_asc":
-        list.sort((a, b) => a.priceCents - b.priceCents);
-        break;
-      case "price_desc":
-        list.sort((a, b) => b.priceCents - a.priceCents);
-        break;
-      case "newest":
-        list.sort((a, b) => b.createdAt - a.createdAt);
-        break;
-      default:
-        list.sort((a, b) => a.order - b.order || b.salesCount - a.salesCount);
-    }
-    return list.slice(0, limit ?? 60);
-  },
+  handler: async (ctx, { categoryId, search, sort, limit }) =>
+    await readActiveProducts(ctx, { categoryId, search, sort, limit }),
 });
 
 export const listFeatured = query({
@@ -164,44 +103,13 @@ export const listNewest = query({
 
 export const getBySlug = query({
   args: { slug: v.string() },
-  handler: async (ctx, { slug }) => {
-    const product = await ctx.db
-      .query("products")
-      .withIndex("by_slug", (q) => q.eq("slug", slug))
-      .first();
-    if (!product || !product.active || product.hidden) return null;
-    const variants = (
-      await ctx.db
-        .query("productVariants")
-        .withIndex("by_product", (q) => q.eq("productId", product._id))
-        .collect()
-    )
-      .filter((v) => v.active)
-      .sort((a, b) => a.order - b.order);
-    const category = product.categoryId
-      ? await ctx.db.get(product.categoryId)
-      : null;
-    return { product, variants, category };
-  },
+  handler: async (ctx, { slug }) => await readProductBySlug(ctx, slug),
 });
 
 export const listRelated = query({
   args: { productId: v.id("products"), categoryId: v.optional(v.id("categories")), limit: v.optional(v.number()) },
-  handler: async (ctx, { productId, categoryId, limit }) => {
-    let list;
-    if (categoryId) {
-      list = await ctx.db
-        .query("products")
-        .withIndex("by_category", (q) => q.eq("categoryId", categoryId))
-        .collect();
-    } else {
-      list = await ctx.db.query("products").collect();
-    }
-    return withCategoryNames(
-      ctx,
-      list.filter((p) => p.active && !p.hidden && p._id !== productId).slice(0, limit ?? 4),
-    );
-  },
+  handler: async (ctx, { productId, categoryId, limit }) =>
+    await readRelatedProducts(ctx, { productId, categoryId, limit }),
 });
 
 // ─── Admin ───

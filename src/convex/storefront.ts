@@ -1,4 +1,5 @@
 import { query } from "./_generated/server";
+import { v } from "convex/values";
 import {
   DEFAULT_HOMEPAGE,
   DEFAULT_STORE,
@@ -6,6 +7,12 @@ import {
   getSetting,
 } from "./lib/data";
 import { buildShareMeta, shareMetaTags } from "./lib/seo";
+import {
+  readActiveProducts,
+  readCategoryBySlug,
+  readProductBySlug,
+  readRelatedProducts,
+} from "./lib/storefrontData";
 
 // Tipos do shell derivados dos padrões do projeto: o frontend importa estes
 // (`import type`, apagado no build) em vez de repetir o formato à mão.
@@ -111,5 +118,63 @@ export const getHome = query({
           totalSpentCents: c.totalSpentCents,
         })),
     };
+  },
+});
+
+/**
+ * Página de categoria numa chamada: a categoria, as subcategorias (chips) e os
+ * produtos dela — incluindo as subcategorias, pela mesma regra do catálogo.
+ *
+ * Antes a tela carregava TODAS as categorias numa consulta e os produtos em
+ * outra; agora é uma só, e a lista de categorias nem sai do servidor.
+ *
+ * Trocar de subcategoria muda só o argumento `subSlug` (1 chamada, igual
+ * antes); voltar para "Todos" reusa a resposta inicial já em cache.
+ */
+export const getCategoryPage = query({
+  args: { slug: v.string(), subSlug: v.optional(v.string()) },
+  handler: async (ctx, { slug, subSlug }) => {
+    const category = await readCategoryBySlug(ctx, slug);
+    if (!category) {
+      return { category: null, subs: [], selectedSlug: slug, products: [] };
+    }
+
+    const subs = (await ctx.db.query("categories").collect())
+      .filter((c) => c.active && c.parentId === category._id)
+      .sort((a, b) => a.order - b.order);
+
+    // A subcategoria pedida só vale se for filha desta categoria.
+    const selected = (subSlug ? subs.find((s) => s.slug === subSlug) : undefined) ?? category;
+
+    const products = await readActiveProducts(ctx, {
+      categoryId: selected._id,
+      sort: "relevance",
+      limit: 60,
+    });
+
+    return { category, subs, selectedSlug: selected.slug, products };
+  },
+});
+
+/**
+ * Página de produto numa chamada: produto, variações, categoria e relacionados.
+ *
+ * Antes os relacionados só eram buscados DEPOIS que o produto chegava (uma ida
+ * e volta extra em toda visita). Agora vêm juntos — mesma regra de
+ * `products.getBySlug` + `products.listRelated`.
+ */
+export const getProductPage = query({
+  args: { slug: v.string() },
+  handler: async (ctx, { slug }) => {
+    const core = await readProductBySlug(ctx, slug);
+    if (!core) return null;
+
+    const related = await readRelatedProducts(ctx, {
+      productId: core.product._id,
+      categoryId: core.product.categoryId,
+      limit: 4,
+    });
+
+    return { ...core, related };
   },
 });

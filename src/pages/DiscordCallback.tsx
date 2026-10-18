@@ -1,11 +1,10 @@
-import { useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { discordRedirectUri } from "@/convex/lib/discord";
+import { useStoreShell } from "@/lib/storefront";
 import {
   attemptMatchesState,
   clearDiscordAttempt,
@@ -27,7 +26,8 @@ export default function DiscordCallbackPage() {
   const [searchParams] = useSearchParams();
   const { signIn } = useAuthActions();
   const navigate = useNavigate();
-  const store = useQuery(api.settings.getStore) as { name?: string; logoUrl?: string } | undefined;
+  // Nome e logo vêm do shell da loja (sem consulta extra nesta tela).
+  const store = useStoreShell()?.store as { name?: string; logoUrl?: string } | undefined;
   const [error, setError] = useState<string | null>(null);
   // StrictMode monta o componente duas vezes em desenvolvimento; o código do
   // Discord só pode ser trocado UMA vez, então a troca roda só na primeira.

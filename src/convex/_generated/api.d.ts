@@ -38,6 +38,7 @@ import type * as lib_admin from "../lib/admin.js";
 import type * as lib_apiEndpoint from "../lib/apiEndpoint.js";
 import type * as lib_apiSchema from "../lib/apiSchema.js";
 import type * as lib_catalog from "../lib/catalog.js";
+import type * as lib_customerTotals from "../lib/customerTotals.js";
 import type * as lib_data from "../lib/data.js";
 import type * as lib_defaultPages from "../lib/defaultPages.js";
 import type * as lib_deliveryLog from "../lib/deliveryLog.js";
@@ -100,6 +101,7 @@ declare const fullApi: ApiFromModules<{
   "lib/apiEndpoint": typeof lib_apiEndpoint;
   "lib/apiSchema": typeof lib_apiSchema;
   "lib/catalog": typeof lib_catalog;
+  "lib/customerTotals": typeof lib_customerTotals;
   "lib/data": typeof lib_data;
   "lib/defaultPages": typeof lib_defaultPages;
   "lib/deliveryLog": typeof lib_deliveryLog;

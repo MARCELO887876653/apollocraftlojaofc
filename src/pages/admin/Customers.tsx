@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
+import { toast } from "sonner";
 import { api } from "@/convex/_generated/api";
 import { formatBRL, formatDate, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_COLOR } from "@/lib/format";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Search, Loader2, Mail } from "lucide-react";
+import { Search, Loader2, Mail, RefreshCw } from "lucide-react";
 
 type Customer = {
   _id: string; email: string; name?: string; discord?: string; minecraftNick?: string;
@@ -17,6 +19,7 @@ type Customer = {
 export default function AdminCustomers() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [repairing, setRepairing] = useState(false);
 
   const customers = useQuery(api.customers.adminList, { search: search || undefined }) as Customer[] | undefined;
   const detail = useQuery(
@@ -24,12 +27,62 @@ export default function AdminCustomers() {
     selectedId ? { id: selectedId as any } : "skip",
   ) as { customer: Customer; orders: any[] } | undefined;
 
+  // "Total gasto" agora conta só pedido pago. Quem tem histórico antigo pode
+  // precisar do recálculo uma vez (o cron também roda sozinho).
+  const repairStatus = useQuery(api.customers.repairTotalsStatus, {});
+  const repairTotals = useMutation(api.customers.repairTotals);
+  const totalsRunning = repairing || repairStatus?.running === true;
+
+  const runRepair = async () => {
+    setRepairing(true);
+    try {
+      const res = await repairTotals({});
+      if (res.started) {
+        toast.success("Recalculando os totais a partir dos pedidos pagos…");
+      } else {
+        toast.info(
+          res.running ? "O recálculo já está rodando." : "Os totais já foram recalculados.",
+        );
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Não foi possível recalcular os totais.");
+    } finally {
+      setRepairing(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Clientes</h1>
         <p className="text-sm text-muted-foreground">Base de clientes e histórico de compras</p>
       </div>
+
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm">
+            <p className="font-medium">Total gasto</p>
+            <p className="text-muted-foreground">
+              {totalsRunning
+                ? "Recalculando os totais a partir dos pedidos pagos…"
+                : "Conta apenas pedidos pagos — o mesmo número do Top 3 da loja."}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => void runRepair()}
+            disabled={totalsRunning}
+            className="shrink-0"
+          >
+            {totalsRunning ? (
+              <Loader2 className="mr-2 size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 size-4" />
+            )}
+            Recalcular totais
+          </Button>
+        </CardContent>
+      </Card>
 
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

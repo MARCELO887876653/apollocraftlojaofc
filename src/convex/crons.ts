@@ -17,4 +17,15 @@ crons.interval(
   {},
 );
 
+// Correção única dos totais de compra dos clientes: o checkout antigo somava
+// pedido PENDENTE no "total gasto" do cliente, e o recálculo (só pedidos pagos)
+// precisa rodar uma vez na base já existente. Depois de concluído ele não faz
+// mais nada — basta alterar o gatilho do painel para sobreviver ao cron.
+crons.interval(
+  "recalcular totais de compra dos clientes (uma vez)",
+  { minutes: 30 },
+  internal.customers.repairTotalsStart,
+  {},
+);
+
 export default crons;

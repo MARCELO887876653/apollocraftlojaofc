@@ -7,6 +7,7 @@ import {
   checkRateLimit, generateOrderNumber, generateToken, getSetting,
 } from "./lib/data";
 import { deliveryStatusValidator, paymentStatusValidator } from "./schema";
+import { applyPaidOrderToCustomer } from "./lib/customerTotals";
 
 // ─── Checkout: criação de pedido (TODOS os valores recalculados no servidor) ───
 
@@ -198,6 +199,10 @@ export const create = mutation({
       .query("customers")
       .withIndex("by_email", (q) => q.eq("email", customer.email!))
       .first();
+    // O acumulado de compras (ordersCount/totalSpentCents) NÃO entra aqui:
+    // todo pedido nasce "pending" e pedido não pago não é compra. Quem soma é a
+    // confirmação do pagamento (gateway, painel ou entrega manual) — ver
+    // lib/customerTotals.ts.
     if (existing) {
       customerId = existing._id;
       await ctx.db.patch(existing._id, {
@@ -205,8 +210,6 @@ export const create = mutation({
         discord: customer.discord ?? existing.discord,
         minecraftNick: customer.minecraftNick ?? existing.minecraftNick,
         phone: customer.phone ?? existing.phone,
-        ordersCount: existing.ordersCount + 1,
-        totalSpentCents: existing.totalSpentCents + total,
         lastOrderAt: now,
       });
     } else {
@@ -216,8 +219,8 @@ export const create = mutation({
         discord: customer.discord,
         minecraftNick: customer.minecraftNick,
         phone: customer.phone,
-        ordersCount: 1,
-        totalSpentCents: total,
+        ordersCount: 0,
+        totalSpentCents: 0,
         firstOrderAt: now,
         lastOrderAt: now,
         createdAt: now,
@@ -546,6 +549,8 @@ export const adminUpdateStatus = mutation({
           items: order.items.map((i: any) => ({ name: i.name, variant: i.variantName, quantity: i.quantity })),
         },
       });
+      // agora sim é compra: entra no acumulado do cliente (Top 3, painel)
+      await applyPaidOrderToCustomer(ctx, order, 1);
       await logAudit(ctx, admin, "order.status_update", "order", id, { paymentStatus });
       return;
     }
@@ -559,6 +564,10 @@ export const adminUpdateStatus = mutation({
       ],
     });
     if (["refunded", "cancelled", "expired", "failed"].includes(paymentStatus)) {
+      // Estorno: o dinheiro saiu do caixa e sai do acumulado do cliente também.
+      if (order.paymentStatus === "paid") {
+        await applyPaidOrderToCustomer(ctx, order, -1);
+      }
       await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCancelForOrder, {
         orderId: id,
         reason: `Pedido ${paymentStatus} (${admin.name})`,
@@ -634,6 +643,8 @@ export const adminDeliverManually = mutation({
           })),
         },
       });
+      // PIX caiu e o admin confirmou na mão: é compra de verdade.
+      await applyPaidOrderToCustomer(ctx, order, 1);
     }
 
     // Comandos automáticos ainda não executados: cancelar para não duplicar.

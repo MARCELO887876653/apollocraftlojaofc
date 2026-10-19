@@ -2,6 +2,7 @@ import { internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { getSetting } from "./lib/data";
+import { applyPaidOrderToCustomer } from "./lib/customerTotals";
 
 // ─────────────────────────────────────────────────────────────
 // Dados de pagamento (runtime padrão) — usados por payments.ts
@@ -104,6 +105,9 @@ export async function transitionOrder(ctx: any, order: any, mpStatus: string) {
     await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCreateForOrder, {
       orderId: order._id,
     });
+    // pagamento confirmado = compra: entra no acumulado do cliente.
+    // (O checkout não soma mais; pedido pendente nunca virou "total gasto".)
+    await applyPaidOrderToCustomer(ctx, order, 1);
     // dispara webhooks de saída
     await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
       event: "order.paid",
@@ -128,6 +132,10 @@ export async function transitionOrder(ctx: any, order: any, mpStatus: string) {
       updatedAt: now,
       statusHistory: [...order.statusHistory, { status: mpStatus, at: now, note: "Status atualizado pelo gateway" }],
     });
+    // reembolso/cancelamento: o valor pago sai do acumulado do cliente
+    if (current === "paid") {
+      await applyPaidOrderToCustomer(ctx, order, -1);
+    }
     // reembolso/cancelamento: cancela entregas pendentes e agenda reversão
     await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCancelForOrder, {
       orderId: order._id,

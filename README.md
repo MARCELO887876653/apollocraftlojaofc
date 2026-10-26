@@ -120,10 +120,54 @@ Regras validadas com medição no deployment (não são teoria):
 - **Tarefa de cron "de uma vez" deve ser REMOVIDA ao terminar.** A de recálculo
   dos totais de cliente já tinha rodado (`customerTotalsRepair.doneAt`) e
   continuava acordando a cada 30 minutos para não fazer nada.
-- **Contagem não justifica leitura total:** hoje o dashboard lê a tabela de
-  produtos inteira só para exibir `productsTotal`. Um contador denormalizado
-  resolveria, mas exige disciplina de escrita em vários caminhos — fica anotado
-  como próximo passo, não como regra.
+- **Contagem não justifica leitura total:** o dashboard lia a tabela de produtos
+  inteira (imagens, descrição, receita em cada documento) só para exibir
+  `productsTotal`. Agora usa o contador de `counters` (tabela `counters`,
+  `lib/counters.ts`), ajustado na MESMA transação do insert/delete do produto —
+  mutations do Convex são serializáveis, então o número não fica defasado.
+  Se o contador ainda não existir, a contagem real é feita uma única vez. As
+  entregas pendentes/falhas também deixaram de ler o histórico inteiro: usam o
+  índice `by_status_retry`, que só toca pendentes/processando/falhas.
+- **Autenticação também custa uma chamada.** A action HTTP da API v1 autenticava
+  (`mutations.internalAuthorize`) e só depois pesquisava/gravava: 2 funções por
+  requisição. As quatro rotas que o addon mais chama (`sync/changes`,
+  `queued_commands`, `queued_commands/claim` e `heartbeat`) agora fazem
+  autenticação + trabalho em UMA mutation (`apiV1Data.internalAuthorizedCall`),
+  com os mesmos checks (hash, revogação, prefixo, rate limit, scope) e as mesmas
+  mensagens de erro. As demais rotas seguem pelo caminho separado.
+- **Busca por id/external_id/slug nunca deve varrer a tabela.** `resolveProduct`
+  e `resolveCategory` (API v1) usavam `collect()` do catálogo inteiro em cada
+  GET/PATCH/DELETE e em cada upsert. Agora usam `normalizeId` + `by_external` +
+  `by_slug`, e o upsert acha o registro pelo índice `by_external`.
+
+### Retenção de logs
+
+Nada é apagado automaticamente — não existe cron de limpeza. A política vive em
+`src/convex/retention.ts` e só é executada por um admin:
+
+| Tabela | Prazo sugerido | Por quê |
+| --- | --- | --- |
+| `apiLogs` | 90 dias | investigar abuso/chave vazada no trimestre |
+| `deliveryEvents` | 180 dias | é o "log completo" usado no suporte de entregas |
+| `deliveryAttempts` | 90 dias | histórico técnico, redundante com os eventos |
+
+`auditLogs` (trilha de responsabilidade) **não** entra na política. Entregas que
+ainda estão `PENDING`/`PROCESSING` nunca perdem eventos/tentativas, mesmo antigas.
+
+Prévia (somente leitura, não apaga nada):
+
+```bash
+bun convex run retention:previewFromCli
+```
+
+Depois de ler a prévia e **decidir**, rode em lotes pequenos (mínimo 30 dias):
+
+```bash
+bun convex run retention:purgeFromCli '{"table":"apiLogs","olderThanDays":90,"maxDocs":200,"confirm":true}'
+```
+
+O retorno traz `deleted`, `skippedLive` e `hasMore`. Repita se `hasMore` for
+true, sempre com autorização explícita.
 
 Ao criar novas telas, prefira ler de um pacote existente (ou acrescentar campos a ele) em vez de somar mais um `useQuery`.
 

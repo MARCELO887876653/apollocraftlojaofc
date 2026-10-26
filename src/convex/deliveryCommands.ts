@@ -1,4 +1,5 @@
 import { query, mutation, internalQuery, internalMutation } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { generateDeliveryId } from "./lib/hash";
@@ -451,14 +452,18 @@ export const internalCancelForOrder = internalMutation({
 // Leituras internas (usadas pela API v1)
 // ─────────────────────────────────────────────────────────────
 
-export const internalListQueued = internalQuery({
-  args: {
-    serverId: v.string(),
-    addonId: v.optional(v.string()),
-    limit: v.number(),
-    now: v.number(),
-  },
-  handler: async (ctx, { serverId, addonId, limit, now }) => {
+type ListQueuedArgs = {
+  serverId: string;
+  addonId?: string;
+  limit: number;
+  now: number;
+};
+
+/** Núcleo da listagem da fila (reutilizado pela rota fundida). */
+export async function listQueuedCore(
+  ctx: QueryCtx,
+  { serverId, addonId, limit, now }: ListQueuedArgs,
+) {
     const servers = serverId === "GLOBAL" ? ["GLOBAL"] : [serverId, "GLOBAL"];
     const collected: any[] = [];
     for (const sid of servers) {
@@ -472,11 +477,20 @@ export const internalListQueued = internalQuery({
         collected.push(r);
       }
     }
-    return collected
-      .sort((a, b) => a.executeAt - b.executeAt || a.createdAt - b.createdAt)
-      .slice(0, limit)
-      .map(toApiShape);
+  return collected
+    .sort((a, b) => a.executeAt - b.executeAt || a.createdAt - b.createdAt)
+    .slice(0, limit)
+    .map(toApiShape);
+}
+
+export const internalListQueued = internalQuery({
+  args: {
+    serverId: v.string(),
+    addonId: v.optional(v.string()),
+    limit: v.number(),
+    now: v.number(),
   },
+  handler: async (ctx, args) => listQueuedCore(ctx, args),
 });
 
 export const internalUserQueue = internalQuery({

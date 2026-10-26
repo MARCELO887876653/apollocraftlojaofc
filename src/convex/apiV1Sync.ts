@@ -1,4 +1,5 @@
 import { internalQuery } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { canAccess } from "./apiV1Catalog";
 
@@ -51,14 +52,18 @@ function compactProduct(p: any) {
   };
 }
 
-export const internalSyncChanges = internalQuery({
-  args: {
-    serverId: v.string(),
-    addonId: v.optional(v.string()),
-    cursor: v.optional(v.string()),
-    limit: v.number(),
-  },
-  handler: async (ctx, { serverId, addonId, cursor, limit }) => {
+type SyncArgs = {
+  serverId: string;
+  addonId?: string;
+  cursor?: string;
+  limit: number;
+};
+
+/**
+ * Núcleo da sincronização incremental. Exportado como função pura de banco
+ * para a rota fundida poder autenticar e sincronizar NUMA única chamada.
+ */
+export async function syncChangesCore(ctx: QueryCtx, { serverId, addonId, cursor, limit }: SyncArgs) {
     const since = cursor ? Number(cursor) : 0;
     const from = Number.isFinite(since) ? since : 0;
     const cap = Math.max(1, Math.min(limit, 200));
@@ -129,10 +134,19 @@ export const internalSyncChanges = internalQuery({
     const hasMore =
       page.length > 0 && (items.length > page.length || cats.length === window || prods.length === window);
 
-    return {
-      changes: page.map((i) => ({ kind: i.kind, ...i.data })),
-      next_cursor: nextCursor,
-      has_more: hasMore,
-    };
+  return {
+    changes: page.map((i) => ({ kind: i.kind, ...i.data })),
+    next_cursor: nextCursor,
+    has_more: hasMore,
+  };
+}
+
+export const internalSyncChanges = internalQuery({
+  args: {
+    serverId: v.string(),
+    addonId: v.optional(v.string()),
+    cursor: v.optional(v.string()),
+    limit: v.number(),
   },
+  handler: async (ctx, args) => syncChangesCore(ctx, args),
 });

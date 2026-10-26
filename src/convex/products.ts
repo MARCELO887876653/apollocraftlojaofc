@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { applyProductUpdate, createProductRecord } from "./lib/catalog";
+import { COUNTER_KEYS, adjustCounter, countProductsReal } from "./lib/counters";
 import { deliveryV1Validator } from "./lib/apiSchema";
 import { assertDeliveryV1Valid } from "./lib/deliveryRecipe";
 import {
@@ -218,6 +219,8 @@ export const remove = mutation({
       .collect();
     for (const vdoc of variants) await ctx.db.delete(vdoc._id);
     await ctx.db.delete(id);
+    // Contador do dashboard: ajuste atômico junto com a exclusão.
+    await adjustCounter(ctx, COUNTER_KEYS.products, -1, () => countProductsReal(ctx));
     await logAudit(ctx, admin, "product.delete", "product", id);
   },
 });

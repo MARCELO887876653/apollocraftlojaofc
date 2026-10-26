@@ -31,6 +31,18 @@ function fail(status: number, code: string, message: string, headers: Record<str
   return { status, body: { errors: [{ message, code }] }, headers };
 }
 
+/** Parse do corpo usado só para decidir a rota fundida (erro → caminho antigo). */
+function parseJsonObject(bodyText?: string): Record<string, any> | null {
+  if (!bodyText) return {};
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, any>;
+  } catch {
+    return null;
+  }
+}
+
 export const handle = action({
   args: {
     method: v.string(),
@@ -49,6 +61,15 @@ export const handle = action({
     const started = Date.now();
     const q = (query ?? {}) as Record<string, string>;
 
+    // Rota (cálculo puro) — necessária antes da autenticação para escolher
+    // entre o caminho fundido e o caminho antigo.
+    const segs = path.split("/").filter(Boolean);
+    const isV1 = segs[0] === "api" && segs[1] === "v1";
+    const afterV1 = isV1 ? segs.slice(2) : [];
+    const isApp = afterV1[0] === "app";
+    const rest = isApp ? afterV1.slice(1) : afterV1;
+    const route = rest.join("/");
+
     // ── 0. Cabeçalhos de autenticação ambíguos ──
     if (ambiguousAuth) {
       return fail(
@@ -62,6 +83,100 @@ export const handle = action({
     if (!token) {
       return fail(401, "MISSING_API_KEY", "Cabeçalho Authorization com Bearer token ausente.");
     }
+
+    // ── 1b. Rotas quentes (todo o tráfego do addon) ──
+    // Autentica E executa numa única mutation. Antes eram duas funções por
+    // requisição; a action continua sendo uma. Ver internalAuthorizedCall.
+    const inlineKind =
+      route === "sync/changes" && method === "GET"
+        ? ("sync" as const)
+        : route === "queued_commands" && method === "GET"
+          ? ("queued" as const)
+          : route === "queued_commands/claim" && method === "POST"
+            ? ("claim" as const)
+            : route === "heartbeat" && method === "POST"
+              ? ("heartbeat" as const)
+              : null;
+    if (inlineKind) {
+      // Corpo inválido cai no caminho antigo, que responde o mesmo 422 de antes.
+      const body =
+        inlineKind === "claim" || inlineKind === "heartbeat" ? parseJsonObject(bodyText) : {};
+      if (body) {
+        const inlineWrite = method !== "GET";
+        const inlineLimit = inlineWrite ? WRITE_LIMIT : GET_LIMIT;
+        try {
+          const res = await ctx.runMutation(internal.apiV1Data.internalAuthorizedCall, {
+            hash: sha256Hex(token),
+            expectedPrefix: tokenPrefix(token),
+            tokenIsLive: token.startsWith("sk_live_"),
+            bucket: inlineWrite ? "write" : "read",
+            rateLimit: inlineLimit,
+            windowMs: WINDOW_MS,
+            method,
+            path,
+            ip,
+            kind: inlineKind,
+            cursor: inlineKind === "sync" && q.cursor ? String(q.cursor) : undefined,
+            pageLimit:
+              inlineKind === "sync"
+                ? Math.min(Number(q.limit) || 100, 200)
+                : inlineKind === "queued"
+                  ? Math.min(Number(q.limit) || 50, 200)
+                  : inlineKind === "claim"
+                    ? Math.min(Number(body.limit) || 20, 100)
+                    : undefined,
+            addonFilter:
+              inlineKind === "queued" && q.addon_id
+                ? q.addon_id
+                : inlineKind === "claim" && body.addon_id
+                  ? String(body.addon_id)
+                  : undefined,
+            requestedServerId:
+              inlineKind === "heartbeat" && body.server_id ? String(body.server_id) : undefined,
+            version:
+              inlineKind === "heartbeat" && (body.version || body.addon_version)
+                ? String(body.version ?? body.addon_version)
+                : undefined,
+            minecraftVersion:
+              inlineKind === "heartbeat" && body.minecraft_version
+                ? String(body.minecraft_version)
+                : undefined,
+            apiClientVersion:
+              inlineKind === "heartbeat" && body.api_client_version
+                ? String(body.api_client_version)
+                : undefined,
+            capabilities: inlineKind === "heartbeat" ? body.capabilities : undefined,
+            errorCode:
+              inlineKind === "heartbeat" && body.error_code ? String(body.error_code) : undefined,
+          });
+          const hdrs: Record<string, string> = res.rate
+            ? {
+                "X-RateLimit-Limit": String(res.rate.limit),
+                "X-RateLimit-Remaining": String(res.rate.remaining),
+              }
+            : {};
+          if (res.rate && !res.rate.allowed) hdrs["Retry-After"] = String(res.rate.retryAfterSec);
+          if (!res.ok) return fail(res.status, res.code, res.message, hdrs);
+          return ok(res.data, hdrs);
+        } catch (e: any) {
+          // Mesma resposta estruturada de antes para falha inesperada.
+          try {
+            await ctx.runMutation(internal.apiV1Data.internalLog, {
+              endpoint: path,
+              method,
+              statusCode: 500,
+              durationMs: Date.now() - started,
+              ip,
+              error: e?.message ?? "internal error",
+            });
+          } catch {
+            // o log nunca derruba a resposta
+          }
+          return fail(500, "INTERNAL_ERROR", "Erro interno no servidor.");
+        }
+      }
+    }
+
     const isWrite = method !== "GET";
     const limit = isWrite ? WRITE_LIMIT : GET_LIMIT;
     const bucket = isWrite ? "write" : "read";
@@ -85,14 +200,7 @@ export const handle = action({
       return fail(401, "INVALID_API_KEY", "Chave de API inválida.");
     }
 
-    // ── 2. Rota ──
-    const segs = path.split("/").filter(Boolean);
-    const isV1 = segs[0] === "api" && segs[1] === "v1";
-    const afterV1 = isV1 ? segs.slice(2) : [];
-    const isApp = afterV1[0] === "app";
-    const rest = isApp ? afterV1.slice(1) : afterV1;
-    const route = rest.join("/");
-
+    // ── 2. Rota (já calculada acima) ──
     const log = async (statusCode: number, error?: string, deliveryId?: string) => {
       // Sucesso não é logado: a autorização já grava 1 amostra por minuto.
       // Só erros (>= 400) entram em `apiLogs`, que é o que interessa no painel.

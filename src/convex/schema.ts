@@ -128,6 +128,8 @@ const schema = defineSchema(
       .index("by_slug", ["slug"])
       .index("by_external", ["externalId"])
       .index("by_parent_order", ["parentId", "order"])
+      // Idempotência da API v1 sem varrer a tabela (ver apiV1Catalog).
+      .index("by_idempotency", ["idempotencyKey"])
       // Sincronização da API v1 (GET /sync/changes): só o que mudou desde o
       // cursor. Antes a rota varria a tabela inteira a cada poll do addon.
       .index("by_updatedAt", ["updatedAt"]),
@@ -176,6 +178,8 @@ const schema = defineSchema(
       .index("by_external", ["externalId"])
       .index("by_category", ["categoryId"])
       .index("by_active_order", ["active", "order"])
+      // Idempotência da API v1 sem varrer a tabela (ver apiV1Catalog).
+      .index("by_idempotency", ["idempotencyKey"])
       // Ver comentário em `categories.by_updatedAt`.
       .index("by_updatedAt", ["updatedAt"]),
 
@@ -418,6 +422,16 @@ const schema = defineSchema(
       ip: v.optional(v.string()),
       createdAt: v.number(),
     }).index("by_createdAt", ["createdAt"]),
+
+    // ─── Contadores denormalizados (leitura O(1) sem varrer tabelas) ───
+    // Usado pelo dashboard: ler a tabela de produtos inteira só para saber
+    // quantos existem custava o documento completo de cada produto (imagens,
+    // descrição, receita). Ver lib/counters.ts.
+    counters: defineTable({
+      key: v.string(),
+      value: v.number(),
+      updatedAt: v.number(),
+    }).index("by_key", ["key"]),
 
     // ─── Visitantes da loja (1 doc por dia, contador incremental) ───
     visits: defineTable({

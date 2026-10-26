@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin } from "./lib/admin";
+import { COUNTER_KEYS, readCounter } from "./lib/counters";
 
 // ─────────────────────────────────────────────────────────────
 // Estatísticas do painel
@@ -61,9 +62,33 @@ export const dashboard = query({
     await requireAdmin(ctx, "orders.view");
     const orders = await ctx.db.query("orders").collect();
     const customers = await ctx.db.query("customers").collect();
-    const products = await ctx.db.query("products").collect();
-    const deliveries = await ctx.db.query("deliveries").collect();
     const visits = await ctx.db.query("visits").collect();
+
+    // ── Produtos: contador denormalizado (1 leitura) ──
+    // Antes esta consulta lia a tabela de produtos INTEIRA — cada documento
+    // com imagens, descrição, benefícios e receita de entrega — só para exibir
+    // a quantidade. O contador é ajustado na mesma transação do insert/delete
+    // (lib/catalog.ts e products.remove). A contagem real só acontece se o
+    // contador ainda não existir (primeira leitura após o deploy).
+    const productCounter = await readCounter(ctx, COUNTER_KEYS.products);
+    const productsTotal =
+      productCounter ?? (await ctx.db.query("products").collect()).length;
+
+    // ── Entregas: só os status que o painel mostra ──
+    // `collect()` lia TODO o histórico de entregas, incluindo as já entregues
+    // (a maioria) e o payload de cada uma. Pelo índice `by_status_retry`
+    // lemos apenas pendentes/processando/falhas.
+    const deliveriesWithStatus = (status: "pending" | "processing" | "failed") =>
+      ctx.db
+        .query("deliveries")
+        .withIndex("by_status_retry", (q) => q.eq("status", status))
+        .collect();
+    const [deliveriesPendingRows, deliveriesProcessingRows, deliveriesFailedRows] =
+      await Promise.all([
+        deliveriesWithStatus("pending"),
+        deliveriesWithStatus("processing"),
+        deliveriesWithStatus("failed"),
+      ]);
 
     const paid = orders.filter((o) => o.paymentStatus === "paid");
     const pending = orders.filter((o) => o.paymentStatus === "pending");
@@ -160,9 +185,9 @@ export const dashboard = query({
       ordersPaid: paid.length,
       ordersPending: pending.length,
       customersTotal: customers.length,
-      productsTotal: products.length,
-      deliveriesPending: deliveries.filter((d) => d.status === "pending" || d.status === "processing").length,
-      deliveriesFailed: deliveries.filter((d) => d.status === "failed").length,
+      productsTotal,
+      deliveriesPending: deliveriesPendingRows.length + deliveriesProcessingRows.length,
+      deliveriesFailed: deliveriesFailedRows.length,
       series,
       monthSeries,
       monthRevenue,

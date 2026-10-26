@@ -1,4 +1,5 @@
 import { internalQuery, internalMutation } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import {
@@ -67,24 +68,43 @@ function toCents(value: any, field: string): number | undefined {
   return Math.round(n * 100);
 }
 
-async function resolveCategory(ctx: any, ref: string) {
-  const all = await ctx.db.query("categories").collect();
-  return (
-    all.find((c: any) => String(c._id) === ref) ??
-    all.find((c: any) => c.externalId === ref) ??
-    all.find((c: any) => c.slug === ref) ??
-    null
-  );
+// Busca por referência (id, external_id ou slug) SEM ler a tabela inteira.
+// Antes cada GET/PATCH/DELETE/upsert de produto ou categoria fazia `collect()`
+// da tabela toda só para achar um documento. Agora são no máximo 3 leituras
+// pontuais, na MESMA ordem de precedência de antes (id → external → slug).
+
+async function resolveCategory(ctx: QueryCtx, ref: string) {
+  const id = ctx.db.normalizeId("categories", ref);
+  if (id) {
+    const byId = await ctx.db.get(id);
+    if (byId) return byId;
+  }
+  const byExternal = await ctx.db
+    .query("categories")
+    .withIndex("by_external", (q) => q.eq("externalId", ref))
+    .first();
+  if (byExternal) return byExternal;
+  return await ctx.db
+    .query("categories")
+    .withIndex("by_slug", (q) => q.eq("slug", ref))
+    .first();
 }
 
-async function resolveProduct(ctx: any, ref: string) {
-  const all = await ctx.db.query("products").collect();
-  return (
-    all.find((p: any) => String(p._id) === ref) ??
-    all.find((p: any) => p.externalId === ref) ??
-    all.find((p: any) => p.slug === ref) ??
-    null
-  );
+async function resolveProduct(ctx: QueryCtx, ref: string) {
+  const id = ctx.db.normalizeId("products", ref);
+  if (id) {
+    const byId = await ctx.db.get(id);
+    if (byId) return byId;
+  }
+  const byExternal = await ctx.db
+    .query("products")
+    .withIndex("by_external", (q) => q.eq("externalId", ref))
+    .first();
+  if (byExternal) return byExternal;
+  return await ctx.db
+    .query("products")
+    .withIndex("by_slug", (q) => q.eq("slug", ref))
+    .first();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -274,11 +294,20 @@ export const internalCreateCategory = internalMutation({
     const ext = optStr(data.external_id);
     const idem = optStr(data.idempotency_key) ?? optStr(meta?.idempotencyKey);
     if (ext || idem) {
-      const all = await ctx.db.query("categories").collect();
-      const existing = all.find(
-        (c) =>
-          (ext && c.externalId === ext) || (idem && c.idempotencyKey === idem),
-      );
+      const byExt =
+        ext &&
+        (await ctx.db
+          .query("categories")
+          .withIndex("by_external", (q) => q.eq("externalId", ext))
+          .first());
+      const existing =
+        byExt ||
+        (idem
+          ? await ctx.db
+              .query("categories")
+              .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idem))
+              .first()
+          : null);
       if (existing) return { category: categoryOut(existing), idempotent: true };
     }
 
@@ -412,10 +441,20 @@ export const internalCreateProduct = internalMutation({
     const ext = optStr(data.external_id);
     const idem = optStr(data.idempotency_key) ?? optStr(meta?.idempotencyKey);
     if (ext || idem) {
-      const all = await ctx.db.query("products").collect();
-      const existing = all.find(
-        (p) => (ext && p.externalId === ext) || (idem && p.idempotencyKey === idem),
-      );
+      const byExt =
+        ext &&
+        (await ctx.db
+          .query("products")
+          .withIndex("by_external", (q) => q.eq("externalId", ext))
+          .first());
+      const existing =
+        byExt ||
+        (idem
+          ? await ctx.db
+              .query("products")
+              .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idem))
+              .first()
+          : null);
       if (existing) return { product: productOut(existing), idempotent: true };
     }
 
@@ -694,10 +733,15 @@ export const internalUpsertCategory = internalMutation({
     const ext = optStr(data.external_id);
     if (!ext) apiError(422, "INVALID_PAYLOAD", "'external_id' é obrigatório no upsert de categoria.");
     const { serverId, addonId } = scopeOf(data, meta);
-    const all = await ctx.db.query("categories").collect();
-    const existing = all.find(
+    // Pelo índice, não pela tabela inteira: external_id + vínculo identificam
+    // no máximo um registro (o filtro de servidor/addon roda só nas duplicatas
+    // do mesmo external_id).
+    const sameExternal = await ctx.db
+      .query("categories")
+      .withIndex("by_external", (q) => q.eq("externalId", ext))
+      .collect();
+    const existing = sameExternal.find(
       (c) =>
-        c.externalId === ext &&
         (c.sourceServerId ?? "GLOBAL") === serverId &&
         (c.sourceAddonId ?? "") === addonId,
     );
@@ -761,10 +805,14 @@ export const internalUpsertProduct = internalMutation({
     const ext = optStr(data.external_id);
     if (!ext) apiError(422, "INVALID_PAYLOAD", "'external_id' é obrigatório no upsert de produto.");
     const { serverId, addonId } = scopeOf(data, meta);
-    const all = await ctx.db.query("products").collect();
-    const existing = all.find(
+    // Pelo índice `by_external` — a versão anterior lia a tabela de produtos
+    // INTEIRA em cada upsert do addon só para achar este documento.
+    const sameExternal = await ctx.db
+      .query("products")
+      .withIndex("by_external", (q) => q.eq("externalId", ext))
+      .collect();
+    const existing = sameExternal.find(
       (p) =>
-        p.externalId === ext &&
         (p.sourceServerId ?? "GLOBAL") === serverId &&
         (p.sourceAddonId ?? "") === addonId,
     );

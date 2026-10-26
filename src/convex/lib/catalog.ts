@@ -1,5 +1,6 @@
 import type { MutationCtx } from "../_generated/server";
 import { slugify } from "./data";
+import { COUNTER_KEYS, adjustCounter, countProductsReal } from "./counters";
 
 // ─────────────────────────────────────────────────────────────
 // Regras compartilhadas do catálogo.
@@ -75,6 +76,8 @@ export async function createProductRecord(ctx: MutationCtx, data: any) {
     createdAt: now,
     updatedAt: now,
   });
+  // Mantém o contador do dashboard na MESMA transação (nunca fica defasado).
+  await adjustCounter(ctx, COUNTER_KEYS.products, 1, () => countProductsReal(ctx));
   return { id, slug };
 }
 

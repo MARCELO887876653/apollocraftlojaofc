@@ -1,7 +1,11 @@
 import { query, internalQuery, internalMutation } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin } from "./lib/admin";
 import { generateClaimToken } from "./lib/hash";
+import { API_SCOPES } from "./lib/apiSchema";
+import { syncChangesCore } from "./apiV1Sync";
+import { listQueuedCore } from "./deliveryCommands";
 import {
   DELIVERY_EVENT,
   logDeliveryEvent,
@@ -103,17 +107,23 @@ export const internalCheckRateLimit = internalMutation({
 // mutation só; o log de sucesso é amostrado (1 por janela de 1 minuto) para
 // não encher a tabela `apiLogs` com polls vazios.
 
-export const internalAuthorize = internalMutation({
-  args: {
-    hash: v.string(),
-    bucket: v.string(),
-    limit: v.number(),
-    windowMs: v.number(),
-    method: v.string(),
-    path: v.string(),
-    ip: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
+type AuthorizeArgs = {
+  hash: string;
+  bucket: string;
+  limit: number;
+  windowMs: number;
+  method: string;
+  path: string;
+  ip?: string;
+};
+
+/**
+ * Núcleo da autorização. É compartilhado pela mutation `internalAuthorize` e
+ * pelas rotas "fundidas" (`internalAuthorizedCall`), para que uma requisição
+ * quente do addon custe UMA função em vez de duas sem enfraquecer nada:
+ * a chave, o rate limit, o `lastUsedAt` e a amostra de log continuam iguais.
+ */
+async function authorizeRequest(ctx: MutationCtx, args: AuthorizeArgs) {
     const now = Date.now();
     const key = await ctx.db
       .query("apiKeysV1")
@@ -189,21 +199,34 @@ export const internalAuthorize = internalMutation({
       if (rateDocId) await ctx.db.patch(rateDocId, { lastSampleAt: now });
     }
 
-    return {
-      ok: true as const,
-      key: {
-        id: key._id,
-        name: key.name,
-        prefix: key.prefix,
-        lastFour: key.lastFour,
-        scopes: key.scopes,
-        serverId: key.serverId,
-        addonId: key.addonId,
-        createdAt: key.createdAt,
-      },
-      rate,
-    };
+  return {
+    ok: true as const,
+    key: {
+      id: key._id,
+      name: key.name,
+      prefix: key.prefix,
+      lastFour: key.lastFour,
+      scopes: key.scopes,
+      serverId: key.serverId,
+      addonId: key.addonId,
+      createdAt: key.createdAt,
+    },
+    rate,
+  };
+}
+
+/** Mutation fina: mantém o contrato antigo para as rotas não fundidas. */
+export const internalAuthorize = internalMutation({
+  args: {
+    hash: v.string(),
+    bucket: v.string(),
+    limit: v.number(),
+    windowMs: v.number(),
+    method: v.string(),
+    path: v.string(),
+    ip: v.optional(v.string()),
   },
+  handler: async (ctx, args) => authorizeRequest(ctx, args),
 });
 
 // ─── Claim/lease atômico ───
@@ -212,15 +235,19 @@ function visibleServers(serverId: string): string[] {
   return serverId === "GLOBAL" ? ["GLOBAL"] : [serverId, "GLOBAL"];
 }
 
-export const internalClaim = internalMutation({
-  args: {
-    apiKeyId: v.id("apiKeysV1"),
-    serverId: v.string(),
-    addonId: v.optional(v.string()),
-    limit: v.number(),
-    leaseMs: v.optional(v.number()),
-  },
-  handler: async (ctx, { apiKeyId, serverId, addonId, limit, leaseMs }) => {
+type ClaimArgs = {
+  apiKeyId: any;
+  serverId: string;
+  addonId?: string;
+  limit: number;
+  leaseMs?: number;
+};
+
+/** Núcleo do claim/lease (reutilizado pela rota fundida). */
+export async function claimForAddon(
+  ctx: MutationCtx,
+  { apiKeyId, serverId, addonId, limit, leaseMs }: ClaimArgs,
+) {
     const now = Date.now();
     const lease = leaseMs ?? CLAIM_LEASE_MS;
 
@@ -367,7 +394,194 @@ export const internalClaim = internalMutation({
         },
       });
     }
-    return claimed;
+  return claimed;
+}
+
+export const internalClaim = internalMutation({
+  args: {
+    apiKeyId: v.id("apiKeysV1"),
+    serverId: v.string(),
+    addonId: v.optional(v.string()),
+    limit: v.number(),
+    leaseMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => claimForAddon(ctx, args),
+});
+
+// ─── Rota fundida: autenticação + trabalho numa ÚNICA chamada ───
+//
+// Por que: o Convex cobra por chamada de função, e a action HTTP da API v1
+// fazia `runMutation(internalAuthorize)` e depois `runQuery`/`runMutation` do
+// trabalho — 2 funções por requisição (3 contando a action). As quatro rotas
+// abaixo são praticamente todas as ~4.500 chamadas diárias do addon.
+//
+// Autorizar e executar na MESMA mutation corta 1 chamada por requisição sem
+// afrouxar nada: hash da chave, chave ativa/revogada, prefixo do token, rate
+// limit por bucket, `lastUsedAt` e scope continuam sendo checados, na mesma
+// ordem e com as mesmas mensagens de erro da rota antiga.
+
+export const internalAuthorizedCall = internalMutation({
+  args: {
+    hash: v.string(),
+    expectedPrefix: v.string(),
+    tokenIsLive: v.boolean(),
+    bucket: v.string(),
+    rateLimit: v.number(),
+    windowMs: v.number(),
+    method: v.string(),
+    path: v.string(),
+    ip: v.optional(v.string()),
+    kind: v.union(
+      v.literal("sync"),
+      v.literal("queued"),
+      v.literal("claim"),
+      v.literal("heartbeat"),
+    ),
+    cursor: v.optional(v.string()),
+    pageLimit: v.optional(v.number()),
+    addonFilter: v.optional(v.string()),
+    requestedServerId: v.optional(v.string()),
+    version: v.optional(v.string()),
+    minecraftVersion: v.optional(v.string()),
+    apiClientVersion: v.optional(v.string()),
+    capabilities: v.optional(v.any()),
+    errorCode: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const auth = await authorizeRequest(ctx, {
+      hash: args.hash,
+      bucket: args.bucket,
+      limit: args.rateLimit,
+      windowMs: args.windowMs,
+      method: args.method,
+      path: args.path,
+      ip: args.ip,
+    });
+    if (!auth.ok) {
+      return {
+        ok: false as const,
+        status: 401,
+        code: auth.code,
+        message:
+          auth.code === "API_KEY_REVOKED"
+            ? "Esta chave de API foi revogada ou desativada."
+            : "Chave de API inválida.",
+      };
+    }
+    const key = auth.key;
+    if (!args.tokenIsLive || key.prefix !== args.expectedPrefix) {
+      return {
+        ok: false as const,
+        status: 401,
+        code: "INVALID_API_KEY" as const,
+        message: "Chave de API inválida.",
+      };
+    }
+
+    // Mesma ordem da rota antiga: rate limit ANTES do scope.
+    const logFailure = async (statusCode: number, error: string) => {
+      await ctx.db.insert("apiLogs", {
+        apiKeyId: key.id,
+        serverId: key.serverId,
+        addonId: key.addonId,
+        endpoint: args.path,
+        method: args.method,
+        statusCode,
+        durationMs: 0,
+        ip: args.ip,
+        error,
+        createdAt: Date.now(),
+      });
+    };
+    if (!auth.rate.allowed) {
+      await logFailure(429, "rate limit");
+      return {
+        ok: false as const,
+        status: 429,
+        code: "RATE_LIMIT_REACHED" as const,
+        message: "Limite de requisições excedido.",
+        rate: auth.rate,
+      };
+    }
+
+    const scopes: string[] = key.scopes ?? [];
+    const serverId = key.serverId || "GLOBAL";
+    const addonId = key.addonId || undefined;
+    const deny = async (message: string) => {
+      await logFailure(403, "scope");
+      return {
+        ok: false as const,
+        status: 403,
+        code: "FORBIDDEN_SCOPE" as const,
+        message,
+        rate: auth.rate,
+      };
+    };
+
+    if (args.kind === "sync") {
+      const need = [API_SCOPES.productsRead, API_SCOPES.categoriesRead];
+      if (!need.some((s) => scopes.includes(s))) {
+        return await deny(`A chave precisa de uma das permissões: ${need.join(", ")}.`);
+      }
+      const data = await syncChangesCore(ctx, {
+        serverId,
+        addonId,
+        cursor: args.cursor,
+        limit: args.pageLimit ?? 100,
+      });
+      return { ok: true as const, rate: auth.rate, data };
+    }
+
+    if (args.kind === "queued") {
+      if (!scopes.includes(API_SCOPES.deliveriesRead)) {
+        return await deny(`A chave não possui a permissão '${API_SCOPES.deliveriesRead}'.`);
+      }
+      const data = await listQueuedCore(ctx, {
+        serverId,
+        addonId: addonId ?? args.addonFilter,
+        limit: args.pageLimit ?? 50,
+        now: Date.now(),
+      });
+      return { ok: true as const, rate: auth.rate, data };
+    }
+
+    if (args.kind === "claim") {
+      const need = [API_SCOPES.deliveriesClaim, API_SCOPES.deliveriesUpdate];
+      if (!need.some((s) => scopes.includes(s))) {
+        return await deny(`A chave precisa de uma das permissões: ${need.join(", ")}.`);
+      }
+      const claimed = await claimForAddon(ctx, {
+        apiKeyId: key.id,
+        serverId,
+        addonId: addonId ?? args.addonFilter,
+        limit: args.pageLimit ?? 20,
+      });
+      return {
+        ok: true as const,
+        rate: auth.rate,
+        data: { data: claimed, count: claimed.length },
+      };
+    }
+
+    if (!scopes.includes(API_SCOPES.serverHeartbeat)) {
+      return await deny(`A chave não possui a permissão '${API_SCOPES.serverHeartbeat}'.`);
+    }
+    const hbServerId = args.requestedServerId ? String(args.requestedServerId) : serverId;
+    const result = await heartbeatCore(ctx, {
+      serverId: hbServerId,
+      addonId,
+      version: args.version,
+      minecraftVersion: args.minecraftVersion,
+      apiClientVersion: args.apiClientVersion,
+      capabilities: args.capabilities,
+      errorCode: args.errorCode,
+      ip: args.ip,
+    });
+    return {
+      ok: true as const,
+      rate: auth.rate,
+      data: { ...result, server_id: hbServerId, online: true },
+    };
   },
 });
 
@@ -697,21 +911,22 @@ async function finishOpenAttempt(
 
 // ─── Heartbeat de servidores/addons ───
 
-export const internalHeartbeat = internalMutation({
-  args: {
-    serverId: v.string(),
-    addonId: v.optional(v.string()),
-    version: v.optional(v.string()),
-    minecraftVersion: v.optional(v.string()),
-    apiClientVersion: v.optional(v.string()),
-    capabilities: v.optional(v.any()),
-    errorCode: v.optional(v.string()),
-    ip: v.optional(v.string()),
-  },
-  handler: async (
-    ctx,
-    { serverId, addonId, version, minecraftVersion, apiClientVersion, capabilities, errorCode, ip },
-  ) => {
+type HeartbeatArgs = {
+  serverId: string;
+  addonId?: string;
+  version?: string;
+  minecraftVersion?: string;
+  apiClientVersion?: string;
+  capabilities?: any;
+  errorCode?: string;
+  ip?: string;
+};
+
+/** Núcleo do heartbeat (reutilizado pela rota fundida). */
+async function heartbeatCore(
+  ctx: MutationCtx,
+  { serverId, addonId, version, minecraftVersion, apiClientVersion, capabilities, errorCode, ip }: HeartbeatArgs,
+) {
     const now = Date.now();
     const existing = addonId
       ? await ctx.db
@@ -753,8 +968,21 @@ export const internalHeartbeat = internalMutation({
       createdAt: now,
       updatedAt: now,
     });
-    return { ok: true as const, serverId, server_time: new Date(now).toISOString() };
+  return { ok: true as const, serverId, server_time: new Date(now).toISOString() };
+}
+
+export const internalHeartbeat = internalMutation({
+  args: {
+    serverId: v.string(),
+    addonId: v.optional(v.string()),
+    version: v.optional(v.string()),
+    minecraftVersion: v.optional(v.string()),
+    apiClientVersion: v.optional(v.string()),
+    capabilities: v.optional(v.any()),
+    errorCode: v.optional(v.string()),
+    ip: v.optional(v.string()),
   },
+  handler: async (ctx, args) => heartbeatCore(ctx, args),
 });
 
 export const internalListServers = internalQuery({

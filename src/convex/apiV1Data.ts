@@ -17,6 +17,13 @@ import {
 const CLAIM_LEASE_MS = 5 * 60 * 1000; // 5 minutos
 const HEARTBEAT_ONLINE_MS = 90 * 1000; // considerado online nos últimos 90s
 
+// Intervalo entre as amostras de log de SUCESSO em `apiLogs` (por chave e
+// bucket). O addon faz poll a cada ~2 minutos; gravar uma linha por minuto
+// gerava ~1.280 escritas/dia de linhas "200 OK" que ninguém lê (medido no
+// deployment: 3.000 linhas em 56 horas, todas de sucesso). Erros continuam
+// sendo registrados individualmente.
+const LOG_SAMPLE_MS = 10 * 60 * 1000;
+
 // Códigos de erro semânticos aceitos na confirmação (PATCH command).
 export const ERROR_CODES = {
   PLAYER_OFFLINE: "PLAYER_OFFLINE",
@@ -124,17 +131,23 @@ export const internalAuthorize = internalMutation({
       .withIndex("by_key", (q) => q.eq("key", rlKey))
       .first();
 
-    let newWindow = false;
     let rate: {
       allowed: boolean;
       remaining: number;
       limit: number;
       retryAfterSec: number;
     };
+    // Id do documento de rate limit desta chave+bucket (novo ou existente) para
+    // carimbar a amostra de log no MESMO documento, sem escrita extra.
+    let rateDocId = doc?._id;
     if (!doc || now - doc.windowStart >= args.windowMs) {
-      newWindow = true;
       if (doc) await ctx.db.patch(doc._id, { windowStart: now, count: 1 });
-      else await ctx.db.insert("rateLimits", { key: rlKey, windowStart: now, count: 1 });
+      else
+        rateDocId = await ctx.db.insert("rateLimits", {
+          key: rlKey,
+          windowStart: now,
+          count: 1,
+        });
       rate = { allowed: true, remaining: args.limit - 1, limit: args.limit, retryAfterSec: 0 };
     } else if (doc.count >= args.limit) {
       rate = {
@@ -158,8 +171,10 @@ export const internalAuthorize = internalMutation({
       await ctx.db.patch(key._id, { lastUsedAt: now });
     }
 
-    // Log amostrado: 1 por janela, em vez de 1 por requisição.
-    if (rate.allowed && newWindow) {
+    // Log amostrado: 1 a cada LOG_SAMPLE_MS por chave+bucket, em vez de 1 por
+    // janela de rate limit (~1/min). Ver LOG_SAMPLE_MS acima.
+    const sample = !doc?.lastSampleAt || now - doc.lastSampleAt >= LOG_SAMPLE_MS;
+    if (rate.allowed && sample) {
       await ctx.db.insert("apiLogs", {
         apiKeyId: key._id,
         serverId: key.serverId,
@@ -171,6 +186,7 @@ export const internalAuthorize = internalMutation({
         ip: args.ip,
         createdAt: now,
       });
+      if (rateDocId) await ctx.db.patch(rateDocId, { lastSampleAt: now });
     }
 
     return {

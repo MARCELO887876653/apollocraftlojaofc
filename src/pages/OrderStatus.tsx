@@ -35,7 +35,23 @@ type Order = {
 };
 
 /** Depois disso o PIX já venceu: paramos de perguntar ao gateway. */
-const MAX_PIX_POLL_MS = 20 * 60 * 1000;
+const MAX_PIX_POLL_MS = 10 * 60 * 1000;
+
+/**
+ * Primeira consulta ao gateway: dá tempo de o webhook do Mercado Pago chegar
+ * sozinho (é o caminho normal, e a página reage na hora pela assinatura do
+ * banco). Só depois disso é que vale gastar uma chamada.
+ */
+const FIRST_PIX_CHECK_MS = 15 * 1000;
+
+/**
+ * Intervalo das consultas seguintes.
+ *
+ * Antes: 5s no primeiro minuto, 15s até 5 min e 30s até 20 min ≈ 58 actions por
+ * pedido pendente (cada uma custa uma action + consultas internas + uma
+ * chamada ao gateway). Agora: 1 por minuto, no máximo 10.
+ */
+const NEXT_PIX_CHECK_MS = 60 * 1000;
 
 const STATUS_COLORS: Record<string, string> = {
   paid: "bg-emerald-500/15 text-emerald-700 border-emerald-500/30",
@@ -68,10 +84,14 @@ export default function OrderStatusPage() {
   const createPix = useAction(api.payments.createPixPayment);
   const refreshStatus = useAction(api.payments.refreshPaymentStatus);
 
-  // Consulta o gateway só enquanto o PIX está pendente — e cada vez com menos
-  // pressa. Antes era uma chamada a cada 5s para sempre (720 por hora, mesmo
-  // com a aba escondida). O webhook do gateway grava a confirmação no banco e
-  // esta tela reage sozinha; o laço abaixo cobre só o caso de ele atrasar.
+  // Consulta o gateway só enquanto o PIX está pendente — e devagar.
+  //
+  // O webhook do gateway grava a confirmação no banco e esta tela reage sozinha
+  // (a assinatura do pedido continua aberta); o cron de reconciliação cobre o
+  // caso de o webhook não estar configurado. Este laço é apenas a rede de
+  // segurança de quem está com a página aberta esperando, e cada rodada custa
+  // uma action + uma consulta interna + uma chamada ao Mercado Pago — por isso
+  // 1x por minuto, no máximo 10 vezes.
   useEffect(() => {
     const orderId = order?._id;
     if (order?.paymentStatus !== "pending" || !order?.gatewayPaymentId || !orderId) return;
@@ -79,6 +99,7 @@ export default function OrderStatusPage() {
     const startedAt = Date.now();
     let timer: number | undefined;
     let stopped = false;
+    let firstCheck = true;
 
     const ask = () => {
       if (stopped || document.visibilityState !== "visible") return;
@@ -90,7 +111,8 @@ export default function OrderStatusPage() {
       const elapsed = Date.now() - startedAt;
       // Passou do prazo do PIX: o QR já venceu e não há o que esperar.
       if (elapsed > MAX_PIX_POLL_MS) return;
-      const delay = elapsed < 60_000 ? 5_000 : elapsed < 300_000 ? 15_000 : 30_000;
+      const delay = firstCheck ? FIRST_PIX_CHECK_MS : NEXT_PIX_CHECK_MS;
+      firstCheck = false;
       timer = window.setTimeout(() => {
         ask();
         schedule();

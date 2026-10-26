@@ -4,7 +4,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { internal } from "./_generated/api";
 import { requireAdmin, logAudit } from "./lib/admin";
 import {
-  checkRateLimit, generateOrderNumber, generateToken, getSetting,
+  checkRateLimit, generateOrderNumber, generateToken, getSetting, readOrderPix,
 } from "./lib/data";
 import { deliveryStatusValidator, paymentStatusValidator } from "./schema";
 import { applyPaidOrderToCustomer } from "./lib/customerTotals";
@@ -331,6 +331,10 @@ export const getByNumber = query({
     if (!order) return null;
     // Sem autorização, não revela nem a existência do pedido.
     if (!(await authorizeOrderView(ctx, order, token))) return null;
+    // O QR Code vem de `orderPix` (fora do documento do pedido) — uma leitura
+    // extra SÓ nesta tela, em troca de todas as listagens/estatísticas não
+    // carregarem mais a imagem base64.
+    const pix = await readOrderPix(ctx, order);
     // Resposta saneada: nunca devolve accessToken, IP nem campos internos.
     return {
       _id: order._id,
@@ -347,9 +351,9 @@ export const getByNumber = query({
       gatewayPaymentId: order.gatewayPaymentId,
       paymentStatus: order.paymentStatus,
       paymentMethod: order.paymentMethod,
-      pixQrCode: order.pixQrCode,
-      pixQrCodeBase64: order.pixQrCodeBase64,
-      pixTicketUrl: order.pixTicketUrl,
+      pixQrCode: pix.pixQrCode,
+      pixQrCodeBase64: pix.pixQrCodeBase64,
+      pixTicketUrl: pix.pixTicketUrl,
       deliveryStatus: order.deliveryStatus,
       statusHistory: order.statusHistory,
       createdAt: order.createdAt,

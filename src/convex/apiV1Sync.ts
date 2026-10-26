@@ -64,23 +64,42 @@ export const internalSyncChanges = internalQuery({
     const cap = Math.max(1, Math.min(limit, 200));
     const key = { serverId: serverId || "GLOBAL", addonId };
 
-    const cats = (await ctx.db.query("categories").collect()).filter((c) =>
-      canAccess(c as any, key),
-    );
-    const prods = (await ctx.db.query("products").collect()).filter((p) =>
-      canAccess(p as any, key),
-    );
+    // Lê APENAS o que mudou desde o cursor, pelo índice `by_updatedAt`.
+    //
+    // Por que: o addon chama esta rota a cada ~2 minutos (medido no deployment:
+    // 1.459 chamadas em 56 horas) e a versão anterior varria produtos e
+    // categorias INTEIROS em cada chamada — ~41 KB de leitura por poll, ~25 MB
+    // por dia, mesmo quando nada tinha mudado. Como normalmente nada mudou, a
+    // faixa do índice vem vazia e o custo vira ~zero.
+    //
+    // Arquivar, editar e criar sempre gravam `updatedAt` (e o arquivamento grava
+    // `archivedAt = updatedAt`), então a faixa cobre também os tombstones.
+    const window = Math.min(cap * 2 + 25, 500);
+    const [cats, prods] = await Promise.all([
+      ctx.db
+        .query("categories")
+        .withIndex("by_updatedAt", (q) => q.gt("updatedAt", from))
+        .take(window),
+      ctx.db
+        .query("products")
+        .withIndex("by_updatedAt", (q) => q.gt("updatedAt", from))
+        .take(window),
+    ]);
 
     const changedCategories = cats
-      .filter((c) => !c.archivedAt && c.updatedAt > from)
+      .filter((c) => canAccess(c as any, key))
+      .filter((c) => !c.archivedAt)
       .sort((a, b) => a.updatedAt - b.updatedAt);
     const changedProducts = prods
-      .filter((p) => !p.archivedAt && p.updatedAt > from)
+      .filter((p) => canAccess(p as any, key))
+      .filter((p) => !p.archivedAt)
       .sort((a, b) => a.updatedAt - b.updatedAt);
     const archivedCategories = cats
+      .filter((c) => canAccess(c as any, key))
       .filter((c) => c.archivedAt && c.archivedAt > from)
       .sort((a, b) => (a.archivedAt ?? 0) - (b.archivedAt ?? 0));
     const archivedProducts = prods
+      .filter((p) => canAccess(p as any, key))
       .filter((p) => p.archivedAt && p.archivedAt > from)
       .sort((a, b) => (a.archivedAt ?? 0) - (b.archivedAt ?? 0));
 
@@ -103,7 +122,12 @@ export const internalSyncChanges = internalQuery({
 
     const page = items.slice(0, cap);
     const nextCursor = page.length ? String(page[page.length - 1].ts) : String(from);
-    const hasMore = items.length > page.length;
+    // Há mais mudanças quando a página encheu ou quando alguma das leituras
+    // bateu no teto da janela (aí existe item que não foi buscado). Página
+    // vazia nunca marca `has_more`: sem item não há cursor novo para avançar e
+    // o addon ficaria repetindo a mesma consulta.
+    const hasMore =
+      page.length > 0 && (items.length > page.length || cats.length === window || prods.length === window);
 
     return {
       changes: page.map((i) => ({ kind: i.kind, ...i.data })),

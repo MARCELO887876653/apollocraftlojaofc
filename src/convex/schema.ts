@@ -127,7 +127,10 @@ const schema = defineSchema(
     })
       .index("by_slug", ["slug"])
       .index("by_external", ["externalId"])
-      .index("by_parent_order", ["parentId", "order"]),
+      .index("by_parent_order", ["parentId", "order"])
+      // Sincronização da API v1 (GET /sync/changes): só o que mudou desde o
+      // cursor. Antes a rota varria a tabela inteira a cada poll do addon.
+      .index("by_updatedAt", ["updatedAt"]),
 
     products: defineTable({
       name: v.string(),
@@ -172,7 +175,9 @@ const schema = defineSchema(
       .index("by_slug", ["slug"])
       .index("by_external", ["externalId"])
       .index("by_category", ["categoryId"])
-      .index("by_active_order", ["active", "order"]),
+      .index("by_active_order", ["active", "order"])
+      // Ver comentário em `categories.by_updatedAt`.
+      .index("by_updatedAt", ["updatedAt"]),
 
     productVariants: defineTable({
       productId: v.id("products"),
@@ -256,6 +261,19 @@ const schema = defineSchema(
       .index("by_createdAt", ["createdAt"])
       .index("by_paymentStatus", ["paymentStatus"])
       .index("by_gatewayPaymentId", ["gatewayPaymentId"]),
+
+    // ─── Payload PIX do pedido (fora do documento de `orders`) ───
+    // O QR Code chega do gateway como imagem em base64 e pesava 78% do
+    // documento do pedido (medido: 65 KB de 91 KB na base real). Como listagens
+    // e estatísticas leem os pedidos inteiros, cada leitura trafegava a imagem
+    // sem precisar. Aqui ela é lida só na tela de status do pedido.
+    orderPix: defineTable({
+      orderId: v.id("orders"),
+      pixQrCode: v.optional(v.string()),
+      pixQrCodeBase64: v.optional(v.string()),
+      pixTicketUrl: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index("by_order", ["orderId"]),
 
     // ─── Fila de entrega automática ───
     deliveries: defineTable({
@@ -414,6 +432,9 @@ const schema = defineSchema(
       key: v.string(),
       windowStart: v.number(),
       count: v.number(),
+      // Carimbo da última amostra gravada em `apiLogs` (ver apiV1Data.
+      // internalAuthorize): evita 1 linha de log por minuto só de sucesso.
+      lastSampleAt: v.optional(v.number()),
     }).index("by_key", ["key"]),
 
     // ─── Avisos de retorno da loja (modo manutenção) ───

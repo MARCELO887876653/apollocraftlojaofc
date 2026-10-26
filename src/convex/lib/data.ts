@@ -181,6 +181,33 @@ export async function checkRateLimit(
   return true;
 }
 
+/**
+ * Payload PIX de um pedido (QR Code, copia-e-cola e link do boleto).
+ *
+ * O QR Code é uma imagem em base64 e pesava 78% do documento do pedido
+ * (medido na base real: 65 KB de 91 KB). Ele mora em `orderPix`, lido só pela
+ * tela de status do pedido; pedidos gerados antes dessa separação ainda têm os
+ * campos no próprio documento e continuam funcionando por este fallback.
+ */
+export async function readOrderPix(
+  ctx: QueryCtx,
+  order: Doc<"orders">,
+): Promise<{
+  pixQrCode?: string;
+  pixQrCodeBase64?: string;
+  pixTicketUrl?: string;
+}> {
+  const row = await ctx.db
+    .query("orderPix")
+    .withIndex("by_order", (q) => q.eq("orderId", order._id))
+    .first();
+  return {
+    pixQrCode: row?.pixQrCode ?? order.pixQrCode,
+    pixQrCodeBase64: row?.pixQrCodeBase64 ?? order.pixQrCodeBase64,
+    pixTicketUrl: row?.pixTicketUrl ?? order.pixTicketUrl,
+  };
+}
+
 export type Product = Doc<"products">;
 export type ProductVariant = Doc<"productVariants">;
 export type Category = Doc<"categories">;

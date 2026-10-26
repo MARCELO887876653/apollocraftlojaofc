@@ -98,6 +98,33 @@ O plano mede **chamadas de função** (query/mutation/action), e cada `useQuery`
 - O guard de conexão usa a chegada do shell como sinal de vida e só faz um teste HTTP quando os dados atrasam — com a loja saudável, zero chamadas extras.
 - O contador de visitas (`stats.trackVisit`) registra 1 por sessão do navegador, não por página.
 
+Regras validadas com medição no deployment (não são teoria):
+
+- **Sincronização do addon:** `GET /api/v1/sync/changes` é chamado a cada ~2 minutos
+  (medido: 1.459 chamadas em 56 h) e lê **só o que mudou**, pelo índice
+  `by_updatedAt`. Antes ele varria produtos e categorias inteiros em cada poll —
+  ~41 KB por chamada, ~25 MB/dia de leitura mesmo sem nenhuma novidade.
+  Qualquer leitura "do que mudou desde X" deve usar índice, nunca `collect()`.
+- **Campos grandes não ficam no documento principal:** o QR Code PIX (imagem em
+  base64) vive em `orderPix`, não em `orders` — ele era 78% do documento do
+  pedido (medido: 65.232 de 90.966 bytes da tabela). O mesmo vale para listas de
+  códigos/serializados: se um dia entrarem em `products.delivery.codes`, elas
+  serão lidas por TODA vitrine, então devem ir para uma tabela própria.
+- **Log de sucesso é amostrado:** em `apiLogs` só os erros entram um a um;
+  sucesso entra 1 amostra a cada 10 minutos por chave (antes era 1 por minuto —
+  medido: 3.000 linhas em 56 h, ~1.280 escritas/dia de ruído puro).
+- **Polling do cliente é rede de segurança, não o caminho principal:** a tela do
+  pedido consulta o gateway 1x por minuto, no máximo 10 vezes (antes ~58
+  consultas por pedido aberto). Quem confirma é o webhook (segundos), e a tela
+  reage sozinha pela assinatura do pedido; o cron reconcilia a cada 15 minutos.
+- **Tarefa de cron "de uma vez" deve ser REMOVIDA ao terminar.** A de recálculo
+  dos totais de cliente já tinha rodado (`customerTotalsRepair.doneAt`) e
+  continuava acordando a cada 30 minutos para não fazer nada.
+- **Contagem não justifica leitura total:** hoje o dashboard lê a tabela de
+  produtos inteira só para exibir `productsTotal`. Um contador denormalizado
+  resolveria, mas exige disciplina de escrita em vários caminhos — fica anotado
+  como próximo passo, não como regra.
+
 Ao criar novas telas, prefira ler de um pacote existente (ou acrescentar campos a ele) em vez de somar mais um `useQuery`.
 
 ## Desenvolvimento

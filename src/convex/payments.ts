@@ -116,7 +116,13 @@ export const createPixPayment = action({
 export const refreshPaymentStatus = action({
   args: { orderId: v.id("orders") },
   handler: async (ctx: any, { orderId }: { orderId: any }) => {
-    const order: any = await ctx.runQuery(dataApi().internalGetOrder, { id: orderId });
+    // Pedido + configuração do gateway numa consulta só: a tela de status do
+    // pedido chama esta action várias vezes enquanto o PIX está pendente, e
+    // antes cada rodada gastava duas queries internas (agora gasta uma).
+    const { order, config } = (await ctx.runQuery(
+      dataApi().internalGetPaymentContext,
+      { id: orderId },
+    )) as { order: any; config: GatewayConfig | null };
     if (!order) throw new Error("Pedido não encontrado");
 
     if (!order.gatewayPaymentId) {
@@ -128,8 +134,7 @@ export const refreshPaymentStatus = action({
       };
     }
 
-    const config = await getGatewayConfig(ctx);
-    const token = resolveToken(config);
+    const token = resolveToken(config ?? {});
     if (!token) {
       throw new Error(
         "Mercado Pago não está configurado. Informe o Access Token em Integrações → Mercado Pago para conferir o pagamento no gateway.",

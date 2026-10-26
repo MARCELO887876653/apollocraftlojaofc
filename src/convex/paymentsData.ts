@@ -20,6 +20,22 @@ export const internalGetOrder = internalQuery({
   handler: async (ctx, { id }) => await ctx.db.get(id),
 });
 
+/**
+ * Pedido + configuração do gateway numa única ida ao banco.
+ *
+ * A consulta de status do cliente (`refreshPaymentStatus`) chamava duas queries
+ * internas por rodada; juntando as duas leituras, cada verificação custa uma
+ * função a menos.
+ */
+export const internalGetPaymentContext = internalQuery({
+  args: { id: v.id("orders") },
+  handler: async (ctx, { id }) => {
+    const order = await ctx.db.get(id);
+    const config = (await getSetting(ctx, "gateway_mercadopago")) as any;
+    return { order, config: config ?? null };
+  },
+});
+
 export const internalGetStoreName = internalQuery({
   args: {},
   handler: async (ctx) => {
@@ -29,14 +45,19 @@ export const internalGetStoreName = internalQuery({
 });
 
 /** Pedidos pendentes que já têm cobrança no gateway — usados pela
- *  reconciliação periódica (convex/crons.ts). */
+ *  reconciliação periódica (convex/crons.ts).
+ *
+ * Lê no máximo `SCAN_CAP` pedidos pendentes (o índice já traz só os pendentes),
+ * em vez de carregar a fila inteira de documentos a cada rodada do cron. */
+const SCAN_CAP = 60;
+
 export const internalListPendingPayments = internalQuery({
   args: { since: v.number(), limit: v.number() },
   handler: async (ctx, { since, limit }) => {
     const pending = await ctx.db
       .query("orders")
       .withIndex("by_paymentStatus", (q) => q.eq("paymentStatus", "pending"))
-      .collect();
+      .take(SCAN_CAP);
     return pending
       .filter((o) => Boolean(o.gatewayPaymentId) && o.createdAt >= since)
       .sort((a, b) => b.createdAt - a.createdAt)
@@ -56,15 +77,77 @@ export const applyPaymentCreation = internalMutation({
   handler: async (ctx, { orderId, gatewayPaymentId, pixQrCode, pixQrCodeBase64, pixTicketUrl }) => {
     const order = await ctx.db.get(orderId);
     if (!order || order.paymentStatus !== "pending") return;
+    const now = Date.now();
+    // O pedido guarda só o que TODA listagem/estatística precisa.
     await ctx.db.patch(orderId, {
       gateway: "mercadopago",
       gatewayPaymentId,
-      pixQrCode,
-      pixQrCodeBase64,
-      pixTicketUrl,
       paymentMethod: "pix",
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
+    // O QR Code (imagem em base64) fica em `orderPix`: ele era 78% do documento
+    // do pedido (medido: 65 KB de 91 KB) e viajava em toda leitura de pedidos —
+    // listagens do painel, dashboard, cron de reconciliação — sem ser usado.
+    const row = await ctx.db
+      .query("orderPix")
+      .withIndex("by_order", (q) => q.eq("orderId", orderId))
+      .first();
+    const payload = { pixQrCode, pixQrCodeBase64, pixTicketUrl };
+    if (row) await ctx.db.patch(row._id, payload);
+    else await ctx.db.insert("orderPix", { orderId, ...payload, createdAt: now });
+  },
+});
+
+/**
+ * Migração de dados (rodar uma vez): move o QR Code PIX que estava DENTRO do
+ * documento do pedido para `orderPix`.
+ *
+ * Nada é perdido — a cópia é gravada ANTES de os campos antigos serem limpos,
+ * e `readOrderPix` lê as duas origens. O ganho é imediato: o documento de
+ * pedido cai de ~4,8 KB para ~1 KB na base real (19 pedidos: 91 KB → 19 KB).
+ *
+ * Roda em lotes por `createdAt`; chame de novo com `cursor = nextCursor` até
+ * ele voltar `null` (na base atual, uma chamada resolve tudo).
+ */
+export const migratePixToOrderPix = internalMutation({
+  args: { cursor: v.optional(v.number()), batch: v.optional(v.number()) },
+  handler: async (ctx, { cursor, batch }) => {
+    const size = Math.max(1, Math.min(batch ?? 100, 200));
+    const orders = await ctx.db
+      .query("orders")
+      .withIndex("by_createdAt", (q) =>
+        cursor === undefined ? q : q.gt("createdAt", cursor),
+      )
+      .take(size);
+
+    let moved = 0;
+    for (const order of orders) {
+      if (!order.pixQrCode && !order.pixQrCodeBase64 && !order.pixTicketUrl) continue;
+      const payload = {
+        pixQrCode: order.pixQrCode,
+        pixQrCodeBase64: order.pixQrCodeBase64,
+        pixTicketUrl: order.pixTicketUrl,
+      };
+      const row = await ctx.db
+        .query("orderPix")
+        .withIndex("by_order", (q) => q.eq("orderId", order._id))
+        .first();
+      if (row) await ctx.db.patch(row._id, payload);
+      else await ctx.db.insert("orderPix", { orderId: order._id, ...payload, createdAt: Date.now() });
+      await ctx.db.patch(order._id, {
+        pixQrCode: undefined,
+        pixQrCodeBase64: undefined,
+        pixTicketUrl: undefined,
+      });
+      moved++;
+    }
+
+    const last = orders[orders.length - 1]?.createdAt;
+    return {
+      scanned: orders.length,
+      moved,
+      nextCursor: orders.length === size && last !== undefined ? last : null,
+    };
   },
 });
 

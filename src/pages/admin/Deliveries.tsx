@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { useSearchParams } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { formatDate, DELIVERY_STATUS_LABEL, DELIVERY_TYPE_LABEL, DELIVERY_STATUS_COLOR } from "@/lib/format";
@@ -20,9 +20,54 @@ export default function AdminDeliveries() {
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState(searchParams.get("status") ?? "all");
 
-  const deliveries = useQuery(api.deliveriesAdmin.adminList, {
-    status: status === "all" ? undefined : status,
-  }) as Delivery[] | undefined;
+  // Paginação por cursor: uma página por vez, sem carregar o histórico.
+  const convex = useConvex();
+  const [loadingMore, setLoadingMore] = useState(false);
+  const listArgs = { status: status === "all" ? undefined : status };
+  const listKey = JSON.stringify(listArgs);
+  // Páginas extras amarradas ao filtro que as pediu (sem misturar filtros).
+  const [more, setMore] = useState<{
+    key: string;
+    rows: Delivery[];
+    cursor: string | null;
+    done: boolean;
+  }>({ key: listKey, rows: [], cursor: null, done: false });
+  const extras = more.key === listKey ? more : { key: listKey, rows: [], cursor: null, done: false };
+
+  const firstPage = useQuery(api.deliveriesAdmin.adminList, { ...listArgs, cursor: null }) as
+    | { page: Delivery[]; continueCursor: string; isDone: boolean }
+    | undefined;
+
+  const deliveries: Delivery[] | undefined = firstPage
+    ? [...firstPage.page, ...extras.rows]
+    : undefined;
+
+  const cursorForMore = extras.cursor ?? firstPage?.continueCursor ?? null;
+  const canLoadMore = Boolean(
+    firstPage &&
+      !extras.done &&
+      cursorForMore &&
+      !(extras.cursor === null && firstPage.isDone),
+  );
+
+  const loadMore = async () => {
+    if (!cursorForMore) return;
+    setLoadingMore(true);
+    try {
+      const res = (await convex.query(api.deliveriesAdmin.adminList, {
+        ...listArgs,
+        cursor: cursorForMore,
+      })) as { page: Delivery[]; continueCursor: string; isDone: boolean };
+      setMore({
+        key: listKey,
+        rows: [...extras.rows, ...res.page],
+        cursor: res.isDone ? null : res.continueCursor,
+        done: res.isDone,
+      });
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const retry = useMutation(api.deliveriesAdmin.adminRetry);
   const markDelivered = useMutation(api.deliveriesAdmin.adminMarkDelivered);
@@ -128,6 +173,15 @@ export default function AdminDeliveries() {
           </div>
         </CardContent>
       </Card>
+
+      {canLoadMore && (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+            Carregar mais entregas
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

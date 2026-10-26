@@ -9,8 +9,11 @@ import { requireAdmin, logAudit } from "./lib/admin";
 export const internalListActive = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const all = await ctx.db.query("webhooksOut").collect();
-    return all.filter((w) => w.active);
+    // Índice em `active` (em vez de ler a tabela inteira para filtrar).
+    return await ctx.db
+      .query("webhooksOut")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .collect();
   },
 });
 

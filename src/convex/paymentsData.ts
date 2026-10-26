@@ -3,6 +3,8 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { getSetting } from "./lib/data";
 import { applyPaidOrderToCustomer } from "./lib/customerTotals";
+import { applyOrderStatusChange } from "./lib/statsRollups";
+import { scheduleWebhookEvent } from "./lib/webhookDispatch";
 
 // ─────────────────────────────────────────────────────────────
 // Dados de pagamento (runtime padrão) — usados por payments.ts
@@ -191,16 +193,20 @@ export async function transitionOrder(ctx: any, order: any, mpStatus: string) {
     // pagamento confirmado = compra: entra no acumulado do cliente.
     // (O checkout não soma mais; pedido pendente nunca virou "total gasto".)
     await applyPaidOrderToCustomer(ctx, order, 1);
-    // dispara webhooks de saída
-    await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-      event: "order.paid",
-      payload: {
-        orderNumber: order.number,
-        total: order.totalCents / 100,
-        customerEmail: order.customerEmail,
-        customerName: order.customerName,
-        items: order.items.map((i: any) => ({ name: i.name, variant: i.variantName, quantity: i.quantity })),
-      },
+    // estatísticas incrementais: pending → paid no dia do pagamento
+    await applyOrderStatusChange(
+      ctx,
+      { createdAt: order.createdAt, paidAt: now, totalCents: order.totalCents, items: order.items },
+      current,
+      "paid",
+    );
+    // dispara webhooks de saída (só quando existe webhook escutando)
+    await scheduleWebhookEvent(ctx, "order.paid", {
+      orderNumber: order.number,
+      total: order.totalCents / 100,
+      customerEmail: order.customerEmail,
+      customerName: order.customerName,
+      items: order.items.map((i: any) => ({ name: i.name, variant: i.variantName, quantity: i.quantity })),
     });
     return;
   }
@@ -219,19 +225,18 @@ export async function transitionOrder(ctx: any, order: any, mpStatus: string) {
     if (current === "paid") {
       await applyPaidOrderToCustomer(ctx, order, -1);
     }
+    // estatísticas incrementais: estorno sai do faturamento do dia do pagamento
+    await applyOrderStatusChange(ctx, order, current, mpStatus);
     // reembolso/cancelamento: cancela entregas pendentes e agenda reversão
     await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCancelForOrder, {
       orderId: order._id,
       reason: `Pagamento ${mpStatus} pelo gateway`,
     });
-    await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-      event: "order.cancelled",
-      payload: {
-        orderNumber: order.number,
-        status: mpStatus,
-        total: order.totalCents / 100,
-        customerEmail: order.customerEmail,
-      },
+    await scheduleWebhookEvent(ctx, "order.cancelled", {
+      orderNumber: order.number,
+      status: mpStatus,
+      total: order.totalCents / 100,
+      customerEmail: order.customerEmail,
     });
   }
 }

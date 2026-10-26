@@ -2,6 +2,7 @@ import { query, mutation, internalQuery, internalMutation } from "./_generated/s
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
+import { computeQueueCountsReal, moveQueueCount, readQueueCounts } from "./lib/queueStats";
 import { generateDeliveryId } from "./lib/hash";
 import { deliveryV1ToRecipe, normalizeActionForQuantity } from "./lib/deliveryRecipe";
 import { DELIVERY_EVENT, logDeliveryEvent, resendInfo, deliveryConsoleLine } from "./lib/deliveryLog";
@@ -209,6 +210,7 @@ export const internalCreateForOrder = internalMutation({
             addonId: action.addonId?.trim() || "custom",
             details: { errorCode: "CONFIGURATION_ERROR", referenceId: null },
           });
+          await moveQueueCount(ctx, undefined, "FAILED");
           created++;
           continue;
         }
@@ -302,6 +304,7 @@ export const internalCreateForOrder = internalMutation({
               stepIndex: j,
             },
           });
+          await moveQueueCount(ctx, undefined, "PENDING");
           created++;
 
           // Agendamento de reversão (ex.: VIP 30 dias → REMOVE_RANK depois)
@@ -350,6 +353,7 @@ export const internalCreateForOrder = internalMutation({
                 addonId,
                 details: { reverseDelaySeconds: action.reverseDelaySeconds ?? 0 },
               });
+              await moveQueueCount(ctx, undefined, "PENDING");
               created++;
             }
           }
@@ -383,20 +387,20 @@ export const internalCancelForOrder = internalMutation({
           claimToken: undefined,
           completedAt: now,
           updatedAt: now,
-        });
-        await logDeliveryEvent(ctx, {
-          deliveryId: c._id,
-          publicId: c.publicId,
-          orderId: c.orderId,
-          orderNumber: c.orderNumber,
-          type: DELIVERY_EVENT.canceled,
-          status: "CANCELED",
-          message: reason ?? "Pedido cancelado ou reembolsado",
-          actor: "SYSTEM",
-          serverId: c.serverId,
-          addonId: c.addonId,
-        });
-        canceled++;
+        });          await logDeliveryEvent(ctx, {
+            deliveryId: c._id,
+            publicId: c.publicId,
+            orderId: c.orderId,
+            orderNumber: c.orderNumber,
+            type: DELIVERY_EVENT.canceled,
+            status: "CANCELED",
+            message: reason ?? "Pedido cancelado ou reembolsado",
+            actor: "SYSTEM",
+            serverId: c.serverId,
+            addonId: c.addonId,
+          });
+          await moveQueueCount(ctx, c.status, "CANCELED");
+          canceled++;
       } else if (c.status === "DONE" && c.reverseAction) {
         // reversão segura apenas quando configurada no produto
         const reverseKey = `${c.idempotencyKey}:refund`;
@@ -440,6 +444,7 @@ export const internalCancelForOrder = internalMutation({
             serverId: c.serverId,
             addonId: c.addonId,
           });
+          await moveQueueCount(ctx, undefined, "PENDING");
           reversed++;
         }
       }
@@ -466,13 +471,17 @@ export async function listQueuedCore(
 ) {
     const servers = serverId === "GLOBAL" ? ["GLOBAL"] : [serverId, "GLOBAL"];
     const collected: any[] = [];
+    // Índice composto + janela de leitura: não lê as agendadas para o futuro
+    // nem o histórico do servidor para montar a prévia da fila.
+    const window = Math.max(20, Math.min(limit, 100) * 3);
     for (const sid of servers) {
       const rows = await ctx.db
         .query("deliveryCommands")
-        .withIndex("by_server_status", (q) => q.eq("serverId", sid).eq("status", "PENDING"))
-        .collect();
+        .withIndex("by_server_status_executeAt", (q) =>
+          q.eq("serverId", sid).eq("status", "PENDING").lte("executeAt", now),
+        )
+        .take(window);
       for (const r of rows) {
-        if (r.executeAt > now) continue;
         if (addonId && r.addonId !== addonId) continue;
         collected.push(r);
       }
@@ -547,13 +556,87 @@ export { BACKOFFS_MS, isVisibleToServer };
 // Painel administrativo
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// Listagem do painel — paginada por cursor
+//
+// Antes: `collect()` da tabela inteira (histórico completo de entregas) para
+// exibir uma página. Agora: uma página por vez, com cursor opaco do Convex,
+// ordenada por `createdAt` desc (ou status + createdAt desc quando há filtro).
+// Os badges das abas vêm do documento de contadores (lib/queueStats.ts), não
+// de uma varredura. Filtros e ordenação continuam iguais.
+// ─────────────────────────────────────────────────────────────
+
+const ADMIN_PAGE_SIZE = 50;
+const ADMIN_FILTER_SCAN_FACTOR = 5;
+const SCHEDULED_COUNT_CAP = 1000;
+
+function clampLimit(limit?: number) {
+  return Math.min(Math.max(Math.floor(limit ?? ADMIN_PAGE_SIZE), 1), 100);
+}
+
 export const adminList = query({
-  args: { status: v.optional(v.string()) },
-  handler: async (ctx, { status }) => {
+  args: {
+    status: v.optional(v.string()),
+    // "only" = agendadas para o futuro; "due" = prontas para o addon.
+    scheduled: v.optional(v.union(v.literal("only"), v.literal("due"))),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { status, scheduled, cursor, limit }) => {
     await requireAdmin(ctx, "deliveries.view");
-    let list = await ctx.db.query("deliveryCommands").collect();
-    if (status) list = list.filter((c) => c.status === status);
-    return list.sort((a, b) => b.createdAt - a.createdAt).map(toAdminShape);
+    const now = Date.now();
+    const numItems = clampLimit(limit);
+
+    const buildQuery = () =>
+      status
+        ? ctx.db
+            .query("deliveryCommands")
+            .withIndex("by_status_createdAt", (q) => q.eq("status", status as any))
+            .order("desc")
+        : ctx.db.query("deliveryCommands").withIndex("by_createdAt").order("desc");
+
+    // UMA paginação por execução (limite do Convex). O filtro de agendamento é
+    // por tempo (`executeAt`), então com ele ativo a janela lida é maior — o
+    // cursor continua avançando a partir dela, sem varrer o histórico.
+    const scanItems = scheduled ? Math.min(numItems * ADMIN_FILTER_SCAN_FACTOR, 200) : numItems;
+    const result = await buildQuery().paginate({ cursor: cursor ?? null, numItems: scanItems });
+    const page = result.page.filter((row: any) => {
+      if (scheduled === "only") return row.status === "PENDING" && row.executeAt > now;
+      if (scheduled === "due") return row.status === "PENDING" && row.executeAt <= now;
+      return true;
+    });
+
+    const counts = (await readQueueCounts(ctx)) ?? (await computeQueueCountsReal(ctx));
+
+    // Agendadas = PENDING com executeAt no futuro (subconjunto pequeno por
+    // natureza: só atrasos configurados no produto). Teto para não varrer; se
+    // não existe PENDING nenhum, nem consulta.
+    const scheduledRows =
+      counts.pending === 0
+        ? []
+        : await ctx.db
+            .query("deliveryCommands")
+            .withIndex("by_status_executeAt", (q) =>
+              q.eq("status", "PENDING").gt("executeAt", now),
+            )
+            .take(SCHEDULED_COUNT_CAP + 1);
+    const scheduledCount = Math.min(scheduledRows.length, SCHEDULED_COUNT_CAP);
+
+    return {
+      page: page.map(toAdminShape),
+      continueCursor: result.continueCursor,
+      isDone: result.isDone,
+      counts: {
+        ALL: counts.pending + counts.processing + counts.done + counts.failed + counts.canceled,
+        PENDING: Math.max(0, counts.pending - scheduledCount),
+        SCHEDULED: scheduledCount,
+        PROCESSING: counts.processing,
+        DONE: counts.done,
+        FAILED: counts.failed,
+        CANCELED: counts.canceled,
+      } satisfies Record<string, number>,
+      countsTruncated: scheduledRows.length > SCHEDULED_COUNT_CAP,
+    };
   },
 });
 
@@ -639,6 +722,7 @@ export const adminRetry = mutation({
       addonId: c.addonId,
       details: { fromStatus: c.status, attempts: c.attempts },
     });
+    await moveQueueCount(ctx, c.status, "PENDING");
     await logAudit(ctx, admin, "delivery_v1.retry", "deliveryCommands", id, { publicId: c.publicId });
   },
 });
@@ -712,6 +796,7 @@ export const adminRedeliver = mutation({
         waitForOnline: Boolean(waitForOnline),
       },
     });
+    await moveQueueCount(ctx, c.status, "PENDING");
     await logAudit(ctx, admin, "delivery_v1.redeliver_done", "deliveryCommands", id, {
       publicId: c.publicId,
       fromStatus: c.status,
@@ -753,6 +838,7 @@ export const adminCancel = mutation({
       addonId: c.addonId,
       details: { fromStatus: c.status },
     });
+    await moveQueueCount(ctx, c.status, "CANCELED");
     await logAudit(ctx, admin, "delivery_v1.cancel", "deliveryCommands", id, { publicId: c.publicId });
   },
 });

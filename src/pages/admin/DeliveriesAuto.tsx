@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useState, type ReactNode } from "react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,8 +56,18 @@ const STATUS_CLASS: Record<string, string> = {
 
 type Filter = "ALL" | "PENDING" | "PROCESSING" | "DONE" | "FAILED" | "CANCELED" | "SCHEDULED";
 
+type ListPage = {
+  page: Command[];
+  continueCursor: string;
+  isDone: boolean;
+  counts: Record<Filter, number>;
+};
+
+const EMPTY_COUNTS: Record<Filter, number> = {
+  ALL: 0, PENDING: 0, PROCESSING: 0, DONE: 0, FAILED: 0, CANCELED: 0, SCHEDULED: 0,
+};
+
 export default function AdminDeliveriesAuto() {
-  const all = useQuery(api.deliveryCommands.adminList, {}) as Command[] | undefined;
   const servers = useQuery(api.apiV1Data.adminListServers) as ServerInfo[] | undefined;
   const [filter, setFilter] = useState<Filter>("ALL");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -66,36 +76,64 @@ export default function AdminDeliveriesAuto() {
   const cancel = useMutation(api.deliveryCommands.adminCancel);
   const redeliver = useMutation(api.deliveryCommands.adminRedeliver);
 
-  const now = Date.now();
-  const commands = useMemo(() => {
-    if (!all) return [];
-    switch (filter) {
-      case "PENDING":
-        return all.filter((c) => c.status === "PENDING" && c.executeAt <= now);
-      case "SCHEDULED":
-        return all.filter((c) => c.status === "PENDING" && c.executeAt > now);
-      case "ALL":
-        return all;
-      default:
-        return all.filter((c) => c.status === filter);
-    }
-  }, [all, filter, now]);
+  // Filtro e paginação no servidor: a página não lê mais o histórico inteiro.
+  // Os badges vêm dos contadores (lib/queueStats.ts), não de uma varredura.
+  const convex = useConvex();
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  const counts = useMemo(() => {
-    const base: Record<Filter, number> = {
-      ALL: all?.length ?? 0, PENDING: 0, PROCESSING: 0, DONE: 0, FAILED: 0, CANCELED: 0, SCHEDULED: 0,
-    };
-    for (const c of all ?? []) {
-      if (c.status === "PENDING") {
-        if (c.executeAt > now) base.SCHEDULED++;
-        else base.PENDING++;
-      } else if (c.status === "PROCESSING") base.PROCESSING++;
-      else if (c.status === "DONE") base.DONE++;
-      else if (c.status === "FAILED") base.FAILED++;
-      else if (c.status === "CANCELED") base.CANCELED++;
+  const listArgs =
+    filter === "ALL"
+      ? {}
+      : filter === "PENDING"
+        ? { status: "PENDING", scheduled: "due" as const }
+        : filter === "SCHEDULED"
+          ? { status: "PENDING", scheduled: "only" as const }
+          : { status: filter };
+  const listKey = JSON.stringify(listArgs);
+  // Páginas extras amarradas à aba que as pediu (trocar de aba nunca mistura).
+  const [more, setMore] = useState<{
+    key: string;
+    rows: Command[];
+    cursor: string | null;
+    done: boolean;
+  }>({ key: listKey, rows: [], cursor: null, done: false });
+  const extras = more.key === listKey ? more : { key: listKey, rows: [], cursor: null, done: false };
+
+  const firstPage = useQuery(api.deliveryCommands.adminList, {
+    ...listArgs,
+    cursor: null,
+  }) as ListPage | undefined;
+
+  const commands = firstPage ? [...firstPage.page, ...extras.rows] : [];
+  const counts = firstPage?.counts ?? EMPTY_COUNTS;
+  const now = Date.now();
+
+  const cursorForMore = extras.cursor ?? firstPage?.continueCursor ?? null;
+  const canLoadMore = Boolean(
+    firstPage &&
+      !extras.done &&
+      cursorForMore &&
+      !(extras.cursor === null && firstPage.isDone),
+  );
+
+  const loadMore = async () => {
+    if (!cursorForMore) return;
+    setLoadingMore(true);
+    try {
+      const res = (await convex.query(api.deliveryCommands.adminList, {
+        ...listArgs,
+        cursor: cursorForMore,
+      })) as ListPage;
+      setMore({
+        key: listKey,
+        rows: [...extras.rows, ...res.page],
+        cursor: res.isDone ? null : res.continueCursor,
+        done: res.isDone,
+      });
+    } finally {
+      setLoadingMore(false);
     }
-    return base;
-  }, [all, now]);
+  };
 
   const TABS: Filter[] = ["ALL", "PENDING", "PROCESSING", "DONE", "FAILED", "CANCELED", "SCHEDULED"];
 
@@ -104,7 +142,7 @@ export default function AdminDeliveriesAuto() {
     openId ? { id: openId as any } : "skip",
   ) as { command: Command; attempts: any[]; events: CommandEvent[] } | undefined;
 
-  if (all === undefined) {
+  if (firstPage === undefined) {
     return <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>;
   }
 
@@ -207,6 +245,15 @@ export default function AdminDeliveriesAuto() {
               <span className="text-xs text-muted-foreground">{c.attempts}/{c.maxAttempts} tent.</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {canLoadMore && (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+            Carregar mais entregas
+          </Button>
         </div>
       )}
 

@@ -8,6 +8,13 @@ import {
 } from "./lib/data";
 import { deliveryStatusValidator, paymentStatusValidator } from "./schema";
 import { applyPaidOrderToCustomer } from "./lib/customerTotals";
+import {
+  applyOrderStatusChange,
+  recordCustomerCreated,
+  recordOrderCreated,
+} from "./lib/statsRollups";
+import { scheduleWebhookEvent } from "./lib/webhookDispatch";
+import { moveQueueCount } from "./lib/queueStats";
 
 // ─── Checkout: criação de pedido (TODOS os valores recalculados no servidor) ───
 
@@ -225,6 +232,7 @@ export const create = mutation({
         lastOrderAt: now,
         createdAt: now,
       });
+      await recordCustomerCreated(ctx);
     }
 
     const orderId = await ctx.db.insert("orders", {
@@ -250,6 +258,9 @@ export const create = mutation({
       updatedAt: now,
     });
 
+    // estatísticas incrementais: pedido criado (sempre nasce pendente)
+    await recordOrderCreated(ctx, { createdAt: now });
+
     if (appliedCoupon) {
       await ctx.db.patch(appliedCoupon._id, {
         usesCount: appliedCoupon.usesCount + 1,
@@ -264,16 +275,14 @@ export const create = mutation({
       });
     }
 
-    // webhooks de saída: pedido criado
-    await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-      event: "order.created",
-      payload: {
-        orderNumber: number,
-        total: total / 100,
-        customerEmail: customer.email,
-        customerName: customer.name ?? customer.email?.split("@")[0],
-        items: orderItems.map((i: any) => ({ name: i.name, variant: i.variantName, quantity: i.quantity })),
-      },
+    // webhooks de saída: pedido criado. O agendamento só acontece quando
+    // existe webhook ativo escutando o evento (ver lib/webhookDispatch.ts).
+    await scheduleWebhookEvent(ctx, "order.created", {
+      orderNumber: number,
+      total: total / 100,
+      customerEmail: customer.email,
+      customerName: customer.name ?? customer.email?.split("@")[0],
+      items: orderItems.map((i: any) => ({ name: i.name, variant: i.variantName, quantity: i.quantity })),
     });
 
     // vendas + criação da fila de entrega
@@ -452,43 +461,74 @@ export const guestDeliveries = query({
 
 // ─── Admin ───
 
+// Página por vez (cursor do Convex), mais recentes primeiro. Antes a lista
+// fazia `collect()` de TODOS os pedidos — com QR Code, itens e histórico de
+// status de cada um — para mostrar a primeira página da tabela.
+const ORDERS_PAGE_SIZE = 50;
+// Com busca textual (filtro em memória) a janela lida é maior; sem busca, a
+// página do índice já é o resultado exato.
+const ORDERS_SEARCH_SCAN_FACTOR = 5;
+
 export const adminList = query({
   args: {
     status: v.optional(v.string()),
     search: v.optional(v.string()),
     from: v.optional(v.number()),
     to: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
   },
-  handler: async (ctx, { status, search, from, to }) => {
+  handler: async (ctx, { status, search, from, to, cursor, limit }) => {
     await requireAdmin(ctx, "orders.view");
-    let orders;
-    if (status) {
-      orders = await ctx.db
-        .query("orders")
-        .withIndex("by_paymentStatus", (q) => q.eq("paymentStatus", status as any))
-        .collect();
-    } else {
-      orders = await ctx.db.query("orders").collect();
-    }
-    let list = orders;
-    if (from) list = list.filter((o) => o.createdAt >= from);
-    if (to) list = list.filter((o) => o.createdAt <= to);
-    if (search) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (o) =>
-          o.number.toLowerCase().includes(s) ||
-          o.customerEmail.toLowerCase().includes(s) ||
-          o.customerName.toLowerCase().includes(s) ||
-          o.gatewayPaymentId?.toLowerCase().includes(s),
-      );
-    }
-    // A lista devolve só o que a tabela do painel usa. Sem isso cada pedido
-    // trafega o documento inteiro — incluindo o QR Code PIX em base64 — e a
-    // página de pedidos fica pesada conforme a loja cresce.
-    return list
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map((o) => ({
+    const numItems = Math.min(Math.max(Math.floor(limit ?? ORDERS_PAGE_SIZE), 1), 100);
+
+    // O filtro (status/data) vai para o índice; a busca textual é aplicada
+    // sobre a página, que é o que permite paginar sem perder resultados.
+    const buildQuery = () =>
+      status
+        ? ctx.db
+            .query("orders")
+            .withIndex("by_paymentStatus_createdAt", (q) =>
+              from !== undefined && to !== undefined
+                ? q
+                    .eq("paymentStatus", status as any)
+                    .gte("createdAt", from)
+                    .lte("createdAt", to)
+                : from !== undefined
+                  ? q.eq("paymentStatus", status as any).gte("createdAt", from)
+                  : to !== undefined
+                    ? q.eq("paymentStatus", status as any).lte("createdAt", to)
+                    : q.eq("paymentStatus", status as any),
+            )
+            .order("desc")
+        : ctx.db
+            .query("orders")
+            .withIndex("by_createdAt", (q) => {
+              if (from !== undefined && to !== undefined)
+                return q.gte("createdAt", from).lte("createdAt", to);
+              if (from !== undefined) return q.gte("createdAt", from);
+              if (to !== undefined) return q.lte("createdAt", to);
+              return q;
+            })
+            .order("desc");
+
+    const needle = search?.trim().toLowerCase();
+    const matches = (o: any) =>
+      !needle ||
+      o.number.toLowerCase().includes(needle) ||
+      o.customerEmail.toLowerCase().includes(needle) ||
+      o.customerName.toLowerCase().includes(needle) ||
+      Boolean(o.gatewayPaymentId?.toLowerCase().includes(needle));
+
+    // O Convex permite UM `.paginate()` por execução. Com busca, lemos uma
+    // janela maior (teto de 200 linhas) para o filtro não devolver página vazia
+    // por acaso — o cursor continua avançando corretamente a partir dela.
+    const scanItems = needle ? Math.min(numItems * ORDERS_SEARCH_SCAN_FACTOR, 200) : numItems;
+    const result = await buildQuery().paginate({ cursor: cursor ?? null, numItems: scanItems });
+
+    // A lista devolve só o que a tabela do painel usa (sem QR Code/itens).
+    return {
+      page: result.page.filter(matches).map((o) => ({
         _id: o._id,
         number: o.number,
         customerName: o.customerName,
@@ -497,7 +537,10 @@ export const adminList = query({
         paymentStatus: o.paymentStatus,
         deliveryStatus: o.deliveryStatus,
         createdAt: o.createdAt,
-      }));
+      })),
+      continueCursor: result.continueCursor,
+      isDone: result.isDone,
+    };
   },
 });
 
@@ -539,19 +582,23 @@ export const adminUpdateStatus = mutation({
           { status: "paid", at: now, note: note ?? `Pagamento confirmado por ${admin.name}` },
         ],
       });
+      // estatísticas: pending → paid (receita entra no dia do pagamento)
+      await applyOrderStatusChange(
+        ctx,
+        { createdAt: order.createdAt, paidAt: now, totalCents: order.totalCents, items: order.items },
+        order.paymentStatus,
+        "paid",
+      );
       await ctx.scheduler.runAfter(0, internal.deliveriesQueue.processOrder, { orderId: id });
       await ctx.scheduler.runAfter(0, internal.deliveryCommands.internalCreateForOrder, {
         orderId: id,
       });
-      await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-        event: "order.paid",
-        payload: {
-          orderNumber: order.number,
-          total: order.totalCents / 100,
-          customerEmail: order.customerEmail,
-          customerName: order.customerName,
-          items: order.items.map((i: any) => ({ name: i.name, variant: i.variantName, quantity: i.quantity })),
-        },
+      await scheduleWebhookEvent(ctx, "order.paid", {
+        orderNumber: order.number,
+        total: order.totalCents / 100,
+        customerEmail: order.customerEmail,
+        customerName: order.customerName,
+        items: order.items.map((i: any) => ({ name: i.name, variant: i.variantName, quantity: i.quantity })),
       });
       // agora sim é compra: entra no acumulado do cliente (Top 3, painel)
       await applyPaidOrderToCustomer(ctx, order, 1);
@@ -567,6 +614,8 @@ export const adminUpdateStatus = mutation({
         { status: paymentStatus, at: now, note: note ?? `Atualizado manualmente por ${admin.name}` },
       ],
     });
+    // estatísticas: estorno/cancelamento sai do faturamento do dia do pagamento
+    await applyOrderStatusChange(ctx, order, order.paymentStatus, paymentStatus);
     if (["refunded", "cancelled", "expired", "failed"].includes(paymentStatus)) {
       // Estorno: o dinheiro saiu do caixa e sai do acumulado do cliente também.
       if (order.paymentStatus === "paid") {
@@ -576,14 +625,11 @@ export const adminUpdateStatus = mutation({
         orderId: id,
         reason: `Pedido ${paymentStatus} (${admin.name})`,
       });
-      await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-        event: "order.cancelled",
-        payload: {
-          orderNumber: order.number,
-          status: paymentStatus,
-          total: order.totalCents / 100,
-          customerEmail: order.customerEmail,
-        },
+      await scheduleWebhookEvent(ctx, "order.cancelled", {
+        orderNumber: order.number,
+        status: paymentStatus,
+        total: order.totalCents / 100,
+        customerEmail: order.customerEmail,
       });
     }
     await logAudit(ctx, admin, "order.status_update", "order", id, { paymentStatus });
@@ -633,22 +679,30 @@ export const adminDeliverManually = mutation({
           },
         ],
       });
-      await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-        event: "order.paid",
-        payload: {
-          orderNumber: order.number,
-          total: order.totalCents / 100,
-          customerEmail: order.customerEmail,
-          customerName: order.customerName,
-          items: order.items.map((i: any) => ({
-            name: i.name,
-            variant: i.variantName,
-            quantity: i.quantity,
-          })),
-        },
+      await scheduleWebhookEvent(ctx, "order.paid", {
+        orderNumber: order.number,
+        total: order.totalCents / 100,
+        customerEmail: order.customerEmail,
+        customerName: order.customerName,
+        items: order.items.map((i: any) => ({
+          name: i.name,
+          variant: i.variantName,
+          quantity: i.quantity,
+        })),
       });
       // PIX caiu e o admin confirmou na mão: é compra de verdade.
       await applyPaidOrderToCustomer(ctx, order, 1);
+      await applyOrderStatusChange(
+        ctx,
+        {
+          createdAt: order.createdAt,
+          paidAt: order.paidAt ?? now,
+          totalCents: order.totalCents,
+          items: order.items,
+        },
+        order.paymentStatus,
+        "paid",
+      );
     }
 
     // Comandos automáticos ainda não executados: cancelar para não duplicar.
@@ -670,6 +724,7 @@ export const adminDeliverManually = mutation({
         completedAt: now,
         updatedAt: now,
       });
+      await moveQueueCount(ctx, c.status, "CANCELED");
       canceledCommands++;
     }
 
@@ -758,14 +813,12 @@ export const adminCancel = mutation({
       updatedAt: now,
       statusHistory: [...order.statusHistory, { status: "cancelled", at: now, note: `Cancelado por ${admin.name}` }],
     });
-    await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-      event: "order.cancelled",
-      payload: {
-        orderNumber: order.number,
-        status: "cancelled",
-        total: order.totalCents / 100,
-        customerEmail: order.customerEmail,
-      },
+    await applyOrderStatusChange(ctx, order, order.paymentStatus, "cancelled");
+    await scheduleWebhookEvent(ctx, "order.cancelled", {
+      orderNumber: order.number,
+      status: "cancelled",
+      total: order.totalCents / 100,
+      customerEmail: order.customerEmail,
     });
     await logAudit(ctx, admin, "order.cancel", "order", id);
   },

@@ -264,6 +264,10 @@ const schema = defineSchema(
       .index("by_email", ["customerEmail"])
       .index("by_createdAt", ["createdAt"])
       .index("by_paymentStatus", ["paymentStatus"])
+      // Listagem do painel: status + ordem por data sem varrer a tabela.
+      .index("by_paymentStatus_createdAt", ["paymentStatus", "createdAt"])
+      // "Últimos pagamentos" do dashboard sem ler todos os pedidos.
+      .index("by_paidAt", ["paidAt"])
       .index("by_gatewayPaymentId", ["gatewayPaymentId"]),
 
     // ─── Payload PIX do pedido (fora do documento de `orders`) ───
@@ -299,7 +303,10 @@ const schema = defineSchema(
       updatedAt: v.number(),
     })
       .index("by_order", ["orderId"])
-      .index("by_status_retry", ["status", "nextRetryAt"]),
+      .index("by_status_retry", ["status", "nextRetryAt"])
+      // Listagem paginada do painel (antes lia a tabela inteira).
+      .index("by_createdAt", ["createdAt"])
+      .index("by_status_createdAt", ["status", "createdAt"]),
 
     // ─── Cupons ───
     coupons: defineTable({
@@ -399,7 +406,7 @@ const schema = defineSchema(
       active: v.boolean(),
       failureCount: v.number(),
       createdAt: v.number(),
-    }),
+    }).index("by_active", ["active"]),
 
     webhookLogs: defineTable({
       webhookId: v.optional(v.id("webhooksOut")),
@@ -432,6 +439,30 @@ const schema = defineSchema(
       value: v.number(),
       updatedAt: v.number(),
     }).index("by_key", ["key"]),
+
+    // ─── Rollups diários de pedidos (1 doc por dia) ───
+    // O dashboard lia TODO o histórico de pedidos a cada abertura para somar
+    // faturamento do dia/30 dias/série. Aqui cada dia vira 1 documento pequeno,
+    // ajustado na MESMA transação da mudança de status do pedido (ver
+    // lib/statsRollups.ts). Nada de varredura: 62 leituras pequenas no pior caso.
+    orderStatsDaily: defineTable({
+      day: v.string(), // "YYYY-MM-DD" (fuso do servidor)
+      ordersCreated: v.number(),
+      paidOrders: v.number(),
+      paidRevenueCents: v.number(),
+      updatedAt: v.number(),
+    }).index("by_day", ["day"]),
+
+    // ─── Rollup por produto (top produtos sem varrer pedidos) ───
+    orderStatsProducts: defineTable({
+      productId: v.id("products"),
+      name: v.string(),
+      qtySold: v.number(),
+      revenueCents: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_product", ["productId"])
+      .index("by_revenue", ["revenueCents"]),
 
     // ─── Visitantes da loja (1 doc por dia, contador incremental) ───
     visits: defineTable({

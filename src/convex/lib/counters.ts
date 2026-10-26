@@ -17,6 +17,16 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 
 export const COUNTER_KEYS = {
   products: "products",
+  // Estatísticas de pedidos (ver lib/statsRollups.ts). Mantidas na MESMA
+  // transação da mudança de status, para o dashboard não varrer `orders`.
+  ordersTotal: "orders:total",
+  ordersPaid: "orders:paid",
+  ordersPending: "orders:pending",
+  revenuePaidCents: "orders:revenuePaidCents",
+  customersTotal: "customers:total",
+  // 0 = backfill de rollups em andamento/necessário, 1 = concluído.
+  statsRollups: "stats:rollups",
+  statsRollupStart: "stats:rollupStart",
 } as const;
 
 export async function readCounter(ctx: QueryCtx, key: string): Promise<number | null> {
@@ -64,4 +74,22 @@ export async function adjustCounter(
 export async function countProductsReal(ctx: QueryCtx): Promise<number> {
   const all = await ctx.db.query("products").collect();
   return all.length;
+}
+
+/**
+ * Grava um valor absoluto (usado só pelo backfill de rollups, que reconstrói
+ * dados derivados — nunca dados de negócio).
+ */
+export async function setCounter(
+  ctx: MutationCtx,
+  key: string,
+  value: number,
+): Promise<void> {
+  const now = Date.now();
+  const doc = await ctx.db
+    .query("counters")
+    .withIndex("by_key", (q) => q.eq("key", key))
+    .first();
+  if (doc) await ctx.db.patch(doc._id, { value, updatedAt: now });
+  else await ctx.db.insert("counters", { key, value, updatedAt: now });
 }

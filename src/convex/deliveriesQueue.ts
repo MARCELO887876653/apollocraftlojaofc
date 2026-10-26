@@ -2,6 +2,7 @@ import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { getSetting } from "./lib/data";
+import { scheduleWebhookEvent } from "./lib/webhookDispatch";
 
 // ─────────────────────────────────────────────────────────────
 // Fila de entrega automática (runtime padrão)
@@ -161,9 +162,10 @@ async function failOrRetry(ctx: any, d: any, error: string) {
       lastError: error,
       updatedAt: Date.now(),
     });
-    await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-      event: "delivery.failed",
-      payload: { orderNumber: d.orderNumber, product: d.productName, error },
+    await scheduleWebhookEvent(ctx, "delivery.failed", {
+      orderNumber: d.orderNumber,
+      product: d.productName,
+      error,
     });
     return;
   }
@@ -239,8 +241,5 @@ async function finishOrderIfDone(ctx: any, orderId: any) {
       { status: "delivered", at: Date.now(), note: "Entrega automática concluída" },
     ],
   });
-  await ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-    event: "order.delivered",
-    payload: { orderNumber: order.number },
-  });
+  await scheduleWebhookEvent(ctx, "order.delivered", { orderNumber: order.number });
 }

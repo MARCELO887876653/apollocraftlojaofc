@@ -200,10 +200,32 @@ export const apiV1Tables = {
     .index("by_publicId", ["publicId"])
     .index("by_status_executeAt", ["status", "executeAt"])
     .index("by_server_status", ["serverId", "status"])
+    // Claim do addon: fila pronta = PENDING com executeAt <= agora, na ordem de
+    // execução. Antes o claim lia TODOS os PENDING do servidor e descartava no
+    // código os agendados para o futuro.
+    .index("by_server_status_executeAt", ["serverId", "status", "executeAt"])
+    // Retry agendado = FAILED com nextAttemptAt vencido.
+    .index("by_server_status_nextAttemptAt", ["serverId", "status", "nextAttemptAt"])
     .index("by_client", ["clientIdentifier"])
     .index("by_order", ["orderId"])
     .index("by_group", ["deliveryGroupId"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    // Listagem paginada do painel (mais recentes primeiro).
+    .index("by_status_createdAt", ["status", "createdAt"]),
+
+  // ─── Contadores por status da fila (1 documento) ───
+  // Os badges de status do painel liam a tabela inteira de comandos. Aqui os
+  // cinco números vivem num único documento, ajustado na mesma transação em
+  // que o status muda (ver lib/queueStats.ts). Sem varredura ao abrir a página.
+  deliveryQueueStats: defineTable({
+    key: v.string(), // "deliveryCommands"
+    pending: v.number(),
+    processing: v.number(),
+    done: v.number(),
+    failed: v.number(),
+    canceled: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 
   // ─── Log completo de cada entrega (linha do tempo do painel) ───
   // Cada linha é um passo: criada, reenviada pelo admin, pega pelo addon,

@@ -139,6 +139,43 @@ Regras validadas com medição no deployment (não são teoria):
   e `resolveCategory` (API v1) usavam `collect()` do catálogo inteiro em cada
   GET/PATCH/DELETE e em cada upsert. Agora usam `normalizeId` + `by_external` +
   `by_slug`, e o upsert acha o registro pelo índice `by_external`.
+- **Estatística de período é rollup, não varredura.** `stats.dashboard` lia
+  `orders` e `customers` inteiros. Agora lê contadores + 1 documento por dia
+  (`orderStatsDaily`), top produtos (`orderStatsProducts`) e no máximo 40 pedidos
+  recentes (`by_paidAt`). Medido em teste com 2.000 pedidos: 2.003 → 101
+  documentos lidos. Os rollups são escritos na MESMA transação da mudança de
+  status (`lib/statsRollups.ts`), então estorno devolve o valor ao dia em que o
+  pedido foi pago. `statsRollups.test.ts` compara o caminho novo com o antigo.
+- **Listagem de painel é paginada.** `orders.adminList`,
+  `deliveriesAdmin.adminList` e `deliveryCommands.adminList` usam
+  `paginate()` + índice (`by_createdAt`, `by_paymentStatus_createdAt`,
+  `by_status_createdAt`) e devolvem `page/continueCursor/isDone`. Medido: uma
+  página de 50 pedidos custa 50 leituras em vez de 2.000. Os badges da fila vêm
+  do documento `deliveryQueueStats` (`lib/queueStats.ts`), não da tabela.
+- **Claim do addon só lê o que venceu.** `by_server_status_executeAt` e
+  `by_server_status_nextAttemptAt` limitam a leitura às entregas prontas, na
+  ordem de execução. Medido com 1.001 PENDING (1 vencida): 1.001 → 2 documentos.
+- **Webhook sem destino não agenda nada.** `lib/webhookDispatch.ts` checa o
+  índice `by_active` na própria mutation: sem webhook ativo inscrito no evento,
+  nenhuma action (`webhooksOut.sendEvent`) é agendada. Com webhook configurado o
+  comportamento é idêntico ao anterior.
+
+### Rollups de estatísticas (backfill único)
+
+O painel usa o caminho novo só depois que o histórico foi agregado. Enquanto
+isso ele continua no caminho antigo (nada fica incompleto). Para rodar uma vez,
+com autorização:
+
+```bash
+npx convex run statsRollups:backfill '{"restart": true}'
+# se vier done:false, repita com o nextCursor:
+# npx convex run statsRollups:backfill '{"cursor":"<nextCursor>"}'
+# confira: npx convex run statsRollups:status
+```
+
+O backfill lê pedidos e escreve **apenas** tabelas derivadas (`orderStatsDaily`,
+`orderStatsProducts`, `counters`) — nenhum pedido, pagamento, cliente, entrega
+ou produto é alterado, e nenhum dado de negócio é apagado.
 
 ### Retenção de logs
 

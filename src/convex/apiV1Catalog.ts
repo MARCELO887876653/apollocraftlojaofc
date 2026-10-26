@@ -2,6 +2,7 @@ import { internalQuery, internalMutation } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
+import { scheduleWebhookEvent } from "./lib/webhookDispatch";
 import {
   applyCategoryUpdate,
   applyProductUpdate,
@@ -253,9 +254,12 @@ function applyRecipeDefaults(deliveryV1: any, meta: any) {
 }
 
 function emit(ctx: any, meta: any, event: string, payload: any) {
-  return ctx.scheduler.runAfter(0, internal.webhooksOut.sendEvent, {
-    event,
-    payload: { ...payload, source: "api_v1", server_id: meta?.serverId, addon_id: meta?.addonId },
+  // Só agenda se algum webhook ativo escuta o evento (lib/webhookDispatch).
+  return scheduleWebhookEvent(ctx, event, {
+    ...payload,
+    source: "api_v1",
+    server_id: meta?.serverId,
+    addon_id: meta?.addonId,
   });
 }
 

@@ -6,6 +6,7 @@ import { generateClaimToken } from "./lib/hash";
 import { API_SCOPES } from "./lib/apiSchema";
 import { syncChangesCore } from "./apiV1Sync";
 import { listQueuedCore } from "./deliveryCommands";
+import { moveQueueCount } from "./lib/queueStats";
 import {
   DELIVERY_EVENT,
   logDeliveryEvent,
@@ -252,11 +253,14 @@ export async function claimForAddon(
     const lease = leaseMs ?? CLAIM_LEASE_MS;
 
     // 1) libera claims expirados (addon caiu depois de pegar a entrega)
+    // PROCESSING é limitado ao que está em voo (lease de 5 min), então aqui a
+    // leitura é naturalmente pequena — o teto protege contra um addon travado
+    // com centenas de reservas abertas.
     for (const sid of visibleServers(serverId)) {
       const processing = await ctx.db
         .query("deliveryCommands")
         .withIndex("by_server_status", (q) => q.eq("serverId", sid).eq("status", "PROCESSING"))
-        .collect();
+        .take(500);
       for (const p of processing) {
         if (p.claimExpiresAt && p.claimExpiresAt < now) {
           await ctx.db.patch(p._id, {
@@ -282,31 +286,41 @@ export async function claimForAddon(
             addonId: p.addonId,
             details: { attempts: p.attempts, claimExpiresAt: p.claimExpiresAt },
           });
+          await moveQueueCount(ctx, "PROCESSING", "PENDING");
         }
       }
     }
 
-    // 2) seleciona entregas disponíveis (PENDING e FAILED retryable vencidas)
+    // 2) seleciona entregas disponíveis (PENDING vencidas e FAILED retryable)
+    //
+    // Antes: `collect()` de TODO PENDING e TODO FAILED do servidor para depois
+    // descartar no código as agendadas para o futuro. Agora o índice composto
+    // (`serverId`,`status`,`executeAt` / `nextAttemptAt`) já devolve só o que
+    // venceu, na ordem de execução, limitado por uma janela de leitura.
+    const scanWindow = Math.max(20, Math.min(limit, 100) * 3);
     const candidates: any[] = [];
     for (const sid of visibleServers(serverId)) {
       const pending = await ctx.db
         .query("deliveryCommands")
-        .withIndex("by_server_status", (q) => q.eq("serverId", sid).eq("status", "PENDING"))
-        .collect();
+        .withIndex("by_server_status_executeAt", (q) =>
+          q.eq("serverId", sid).eq("status", "PENDING").lte("executeAt", now),
+        )
+        .take(scanWindow);
       for (const r of pending) {
-        if (r.executeAt > now) continue;
         if (addonId && r.addonId !== addonId) continue;
         candidates.push(r);
       }
       // retries agendados: status FAILED + retryable=true + nextAttemptAt vencido
+      // (toda falha retentável grava `nextAttemptAt`; o índice salta as demais)
       const failed = await ctx.db
         .query("deliveryCommands")
-        .withIndex("by_server_status", (q) => q.eq("serverId", sid).eq("status", "FAILED"))
-        .collect();
+        .withIndex("by_server_status_nextAttemptAt", (q) =>
+          q.eq("serverId", sid).eq("status", "FAILED").lte("nextAttemptAt", now),
+        )
+        .take(scanWindow);
       for (const r of failed) {
         if (r.retryable !== true) continue;
         if (r.requiresManualIntervention) continue;
-        if ((r.nextAttemptAt ?? r.executeAt) > now) continue;
         if (addonId && r.addonId !== addonId) continue;
         candidates.push(r);
       }
@@ -328,6 +342,7 @@ export async function claimForAddon(
         lastAttemptAt: now,
         updatedAt: now,
       });
+      await moveQueueCount(ctx, c.status, "PROCESSING");
       await ctx.db.insert("deliveryAttempts", {
         deliveryId: c._id,
         apiKeyId,
@@ -684,6 +699,7 @@ export const internalConfirm = internalMutation({
         ...clearClaim,
         updatedAt: now,
       });
+      await moveQueueCount(ctx, c.status, "DONE");
       await finishOpenAttempt(ctx, c._id, "DONE", finalResponse, reason);
       await logDeliveryEvent(ctx, {
         deliveryId: c._id,
@@ -720,6 +736,7 @@ export const internalConfirm = internalMutation({
         ...clearClaim,
         updatedAt: now,
       });
+      await moveQueueCount(ctx, c.status, "CANCELED");
       await finishOpenAttempt(ctx, c._id, "CANCELED", response, reason);
       await logDeliveryEvent(ctx, {
         deliveryId: c._id,
@@ -755,6 +772,7 @@ export const internalConfirm = internalMutation({
         ...clearClaim,
         updatedAt: now,
       });
+      await moveQueueCount(ctx, c.status, "PENDING");
       await finishOpenAttempt(ctx, c._id, "PENDING", response, reason);
       await logDeliveryEvent(ctx, {
         deliveryId: c._id,
@@ -802,6 +820,7 @@ export const internalConfirm = internalMutation({
         ...clearClaim,
         updatedAt: now,
       });
+      await moveQueueCount(ctx, c.status, "FAILED");
       await finishOpenAttempt(ctx, c._id, "FAILED", response, reason);
       await logDeliveryEvent(ctx, {
         deliveryId: c._id,
@@ -845,6 +864,7 @@ export const internalConfirm = internalMutation({
       ...clearClaim,
       updatedAt: now,
     });
+    await moveQueueCount(ctx, c.status, "FAILED");
     await finishOpenAttempt(ctx, c._id, "FAILED", response, reason);
     await logDeliveryEvent(ctx, {
       deliveryId: c._id,

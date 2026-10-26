@@ -7,17 +7,31 @@ import { requireAdmin, logAudit } from "./lib/admin";
 // Admin: fila de entregas (listar, reprocessar, marcar entregue)
 // ─────────────────────────────────────────────────────────────
 
+// Página por vez (cursor opaco do Convex), mais recentes primeiro. Antes a
+// consulta lia o histórico INTEIRO de entregas para desenhar uma tabela.
+const PAGE_SIZE = 50;
+
 export const adminList = query({
-  args: { status: v.optional(v.string()) },
-  handler: async (ctx, { status }) => {
+  args: {
+    status: v.optional(v.string()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { status, cursor, limit }) => {
     await requireAdmin(ctx, "deliveries.view");
-    let list = await ctx.db.query("deliveries").collect();
-    if (status) list = list.filter((d) => d.status === status);
+    const numItems = Math.min(Math.max(Math.floor(limit ?? PAGE_SIZE), 1), 100);
+    const result = await (status
+      ? ctx.db
+          .query("deliveries")
+          .withIndex("by_status_createdAt", (q) => q.eq("status", status as any))
+          .order("desc")
+      : ctx.db.query("deliveries").withIndex("by_createdAt").order("desc")
+    ).paginate({ cursor: cursor ?? null, numItems });
+
     // A tabela do painel não usa o payload da entrega (códigos/mensagens);
     // removê-lo evita trafegar documentos grandes linha a linha.
-    return list
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map((d) => ({
+    return {
+      page: result.page.map((d) => ({
         _id: d._id,
         orderNumber: d.orderNumber,
         productName: d.productName,
@@ -30,7 +44,10 @@ export const adminList = query({
         lastError: d.lastError,
         createdAt: d.createdAt,
         deliveredAt: d.deliveredAt,
-      }));
+      })),
+      continueCursor: result.continueCursor,
+      isDone: result.isDone,
+    };
   },
 });
 

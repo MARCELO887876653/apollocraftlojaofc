@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import { useSearchParams } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { formatBRL, formatDate, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_COLOR, DELIVERY_STATUS_LABEL, DELIVERY_EVENT_LABEL, DELIVERY_EVENT_COLOR } from "@/lib/format";
@@ -20,6 +20,19 @@ type Order = {
   subtotalCents: number; discountCents: number; totalCents: number; couponCode?: string;
   paymentStatus: string; deliveryStatus: string; gateway?: string; gatewayPaymentId?: string;
   createdAt: number; paidAt?: number; statusHistory: Array<{ status: string; at: number; note?: string }>;
+};
+
+// Linha da tabela: a listagem paginada devolve só o que ela mostra (sem itens,
+// histórico e QR Code) — o documento completo só vem no detalhe.
+type OrderListRow = {
+  _id: string;
+  number: string;
+  customerName: string;
+  customerEmail: string;
+  totalCents: number;
+  paymentStatus: string;
+  deliveryStatus: string;
+  createdAt: number;
 };
 
 const STATUSES = ["pending", "paid", "cancelled", "expired", "refunded", "failed"] as const;
@@ -70,10 +83,60 @@ export default function AdminOrders() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const orders = useQuery(api.orders.adminList, {
+  // Lista paginada por cursor: a primeira página é reativa, as próximas vêm
+  // sob demanda ("Carregar mais") — o painel não lê mais todos os pedidos.
+  const convex = useConvex();
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const listArgs = {
     status: status === "all" ? undefined : status,
     search: search || undefined,
-  }) as Order[] | undefined;
+  };
+  // As páginas extras ficam amarradas ao filtro que as pediu: trocar de
+  // filtro nunca mostra (nem mistura) linhas do filtro anterior.
+  const listKey = JSON.stringify(listArgs);
+  const [more, setMore] = useState<{
+    key: string;
+    rows: OrderListRow[];
+    cursor: string | null;
+    done: boolean;
+  }>({ key: listKey, rows: [], cursor: null, done: false });
+  const extras = more.key === listKey ? more : { key: listKey, rows: [], cursor: null, done: false };
+
+  const firstPage = useQuery(api.orders.adminList, { ...listArgs, cursor: null }) as
+    | { page: OrderListRow[]; continueCursor: string; isDone: boolean }
+    | undefined;
+
+  const orders: OrderListRow[] | undefined = firstPage
+    ? [...firstPage.page, ...extras.rows]
+    : undefined;
+
+  const cursorForMore = extras.cursor ?? firstPage?.continueCursor ?? null;
+  const canLoadMore = Boolean(
+    firstPage &&
+      !extras.done &&
+      cursorForMore &&
+      !(extras.cursor === null && firstPage.isDone),
+  );
+
+  const loadMore = async () => {
+    if (!cursorForMore) return;
+    setLoadingMore(true);
+    try {
+      const res = (await convex.query(api.orders.adminList, {
+        ...listArgs,
+        cursor: cursorForMore,
+      })) as { page: OrderListRow[]; continueCursor: string; isDone: boolean };
+      setMore({
+        key: listKey,
+        rows: [...extras.rows, ...res.page],
+        cursor: res.isDone ? null : res.continueCursor,
+        done: res.isDone,
+      });
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const detail = useQuery(
     api.orders.adminGet,
@@ -357,6 +420,15 @@ export default function AdminOrders() {
           </div>
         </CardContent>
       </Card>
+
+      {canLoadMore && (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+            Carregar mais pedidos
+          </Button>
+        </div>
+      )}
 
       <Dialog
         open={!!selectedId}

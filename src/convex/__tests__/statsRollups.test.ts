@@ -5,6 +5,7 @@ import schema from "../schema";
 import { api, internal } from "../_generated/api";
 import { hasWebhookFor, scheduleWebhookEvent } from "../lib/webhookDispatch";
 import { readQueueCounts, computeQueueCountsReal } from "../lib/queueStats";
+import { dayKey } from "../lib/statsRollups";
 
 const modules = import.meta.glob(["../**/*.ts", "!../**/*.test.ts"]);
 
@@ -181,6 +182,99 @@ describe("stats: rollups incrementais", () => {
     expect(after.recentOrders.map((o: any) => o.number)).toEqual(
       before.recentOrders.map((o: any) => o.number),
     );
+  });
+
+  test("backfill não conta duas vezes um pagamento posterior ao seu início", async () => {
+    const t = convexTest(schema, modules);
+    const now = Date.now();
+    const productId = await seedProduct(t, "VIP OURO", 4000);
+
+    // Pago ANTES do início do backfill: esse dia é reconstruído pelo backfill.
+    const paidBefore = now - 1 * DAY;
+    await seedOrder(t, {
+      number: "#G1",
+      paymentStatus: "paid",
+      totalCents: 4000,
+      paidAt: paidBefore,
+      createdAt: now - 2 * DAY,
+      productId,
+      productName: "VIP OURO",
+      quantity: 1,
+    });
+    // Pago DEPOIS do início do backfill: quem conta é o hook incremental, que
+    // roda no instante do pagamento. Se o backfill também contasse, a receita
+    // deste dia entraria em dobro (era o furo real da versão anterior).
+    const paidAfter = now + 2 * DAY;
+    await seedOrder(t, {
+      number: "#G2",
+      paymentStatus: "paid",
+      totalCents: 7000,
+      paidAt: paidAfter,
+      createdAt: now - 2 * DAY,
+      productId,
+      productName: "VIP OURO",
+      quantity: 1,
+    });
+
+    await t.mutation(internal.statsRollups.backfill, { restart: true });
+
+    const rows = await t.run(async (ctx) => ({
+      daily: await ctx.db.query("orderStatsDaily").collect(),
+      counters: await ctx.db.query("counters").collect(),
+      products: await ctx.db.query("orderStatsProducts").collect(),
+    }));
+
+    const beforeRow = rows.daily.find((d) => d.day === dayKey(paidBefore));
+    const afterRow = rows.daily.find((d) => d.day === dayKey(paidAfter));
+
+    // Dia do pagamento anterior: reconstruído pelo backfill.
+    expect(beforeRow?.paidOrders).toBe(1);
+    expect(beforeRow?.paidRevenueCents).toBe(4000);
+    // Dia do pagamento posterior: NÃO entra pelo backfill (é do hook).
+    expect(afterRow?.paidOrders ?? 0).toBe(0);
+    expect(afterRow?.paidRevenueCents ?? 0).toBe(0);
+
+    // O contador de pagos é ABSOLUTO (snapshot do estado atual): conta os dois.
+    expect(rows.counters.find((c) => c.key === "orders:paid")?.value).toBe(2);
+    // A venda por produto soma só o que o backfill pode reconstruir.
+    expect(rows.products[0]?.qtySold).toBe(1);
+    expect(rows.products[0]?.revenueCents).toBe(4000);
+  });
+
+  test("rodar o backfill de novo depois de concluído não soma em dobro", async () => {
+    const t = convexTest(schema, modules);
+    const now = Date.now();
+    const paidAt = now - 3 * DAY;
+    await seedOrder(t, {
+      number: "#H1",
+      paymentStatus: "paid",
+      totalCents: 2500,
+      paidAt,
+      createdAt: now - 4 * DAY,
+    });
+
+    await t.mutation(internal.statsRollups.backfill, { restart: true });
+    const dailyRow = () =>
+      t.run(async (ctx) =>
+        (await ctx.db.query("orderStatsDaily").collect()).find((d) => d.day === dayKey(paidAt)),
+      );
+    const first = await dailyRow();
+    expect(first?.paidOrders).toBe(1);
+    expect(first?.paidRevenueCents).toBe(2500);
+
+    // Segunda passada sem `restart`: um backfill concluído é no-op. Antes, ela
+    // relia o mesmo intervalo e somava tudo de novo (receita em dobro).
+    const again = await t.mutation(internal.statsRollups.backfill, {});
+    expect(again.done).toBe(true);
+    expect((again as any).alreadyDone).toBe(true);
+
+    const second = await dailyRow();
+    expect(second?.paidOrders).toBe(1);
+    expect(second?.paidRevenueCents).toBe(2500);
+
+    const stats = (await t.withIdentity(await seedAdmin(t)).query(api.stats.dashboard, {})) as any;
+    expect(stats.ordersPaid).toBe(1);
+    expect(stats.revenueTotal).toBe(2500);
   });
 
   test("30 dias e série diária somam o mesmo faturamento pago do período", async () => {

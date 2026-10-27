@@ -27,8 +27,33 @@ export const STORE_DEPLOYMENT_URL = "https://capable-akita-865.convex.cloud";
 export const STORE_DASHBOARD_URL =
   "https://dashboard.convex.dev/t/freebuff/7cf38cdf-8e08-4dcd-bfce-f72dfc8d2371/capable-akita-865";
 
+/**
+ * Deployments que já existiram para esta loja e NÃO a servem mais.
+ *
+ * Por que existe: um build publicado saiu com `VITE_CONVEX_URL` apontando para
+ * `tidy-mandrill-432` (um endereço que não executa mais nada). Como ele vinha
+ * ANTES do deployment real na lista de candidatos, TODA visita gastava uma
+ * tentativa inútil: o cliente abria um WebSocket que nunca conectava, o guard
+ * disparava um POST de diagnóstico que voltava 500 e só então o app trocava de
+ * endereço — tela de erro piscando e erro no log do Convex à toa.
+ *
+ * Endereços desta lista são pulados: nunca são tentados nem sondados. Isto NÃO
+ * troca o deployment ativo (segue sendo `VITE_CONVEX_URL`), apenas evita um
+ * endereço que já se sabe morto. Ao consolidar um deployment novo, basta
+ * apontar `VITE_CONVEX_URL`/`STORE_DEPLOYMENT_URL` para ele; inclua aqui apenas
+ * um endereço antigo que volte a aparecer em algum build.
+ */
+export const RETIRED_DEPLOYMENTS: readonly string[] = [
+  "https://tidy-mandrill-432.convex.cloud",
+];
+
 /** Formato de um endereço de deployment Convex. */
 const CONVEX_DEPLOYMENT = /^https:\/\/[a-z0-9-]+\.convex\.cloud$/i;
+
+/** O endereço está na lista de deployments aposentados (nunca deve ser tentado). */
+export function isRetiredDeployment(url: string): boolean {
+  return RETIRED_DEPLOYMENTS.includes(url);
+}
 
 /**
  * Normaliza o valor de VITE_CONVEX_URL. Devolve "" quando ausente ou quando não
@@ -43,10 +68,15 @@ export function configuredConvexUrl(raw?: string | null): string {
  * Endereços a tentar, em ordem: o configurado no build e, se ele nunca
  * conectar, o deployment desta loja. Quando os dois coincidem (ou o configurado
  * está ausente), devolve um único endereço — sem tentativa extra.
+ *
+ * Um endereço APOSENTADO (ver RETIRED_DEPLOYMENTS) é descartado antes de tudo:
+ * se o build saiu com ele embutido, o app vai direto ao deployment da loja, sem
+ * tentativa, sem erro e sem reconexão. `VITE_CONVEX_URL` continua mandando
+ * quando aponta para um endereço válido — inclusive um deployment novo.
  */
 export function convexUrlCandidates(raw?: string | null): string[] {
   const configured = configuredConvexUrl(raw);
-  if (!configured) return [STORE_DEPLOYMENT_URL];
+  if (!configured || isRetiredDeployment(configured)) return [STORE_DEPLOYMENT_URL];
   return configured === STORE_DEPLOYMENT_URL ? [configured] : [configured, STORE_DEPLOYMENT_URL];
 }
 

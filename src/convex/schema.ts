@@ -480,6 +480,11 @@ const schema = defineSchema(
       // Carimbo da última amostra gravada em `apiLogs` (ver apiV1Data.
       // internalAuthorize): evita 1 linha de log por minuto só de sucesso.
       lastSampleAt: v.optional(v.number()),
+      // Assinatura/carimbo do último ERRO registrado nesta chave+bucket (ver
+      // apiV1Data.internalAuthorizedCall): erro idêntico repetido não cria
+      // linha nova. Campos opcionais — registros antigos seguem válidos.
+      lastErrorSignature: v.optional(v.string()),
+      lastErrorAt: v.optional(v.number()),
     }).index("by_key", ["key"]),
 
     // ─── Avisos de retorno da loja (modo manutenção) ───

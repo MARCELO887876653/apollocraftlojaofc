@@ -23,6 +23,14 @@ import { bumpDaily, bumpProduct, dayKey } from "./lib/statsRollups";
 // (`.lt("createdAt", startMs)`) e os hooks incrementais contam os criados
 // depois dele — inclusive o mesmo milissegundo do restart, que fica de fora do
 // `.lt`. Assim nenhum pedido entra duas vezes e nenhum fica sem ser contado.
+//
+// Uma segunda guarda cobre o PAGAMENTO: um pedido criado antes do início mas
+// PAGO depois dele já é contado pelo hook incremental (que roda no instante do
+// pagamento). Se o backfill somasse esse pagamento outra vez, o dia receberia a
+// receita em dobro. Por isso a contribuição de pagamento (pedidos pagos,
+// faturamento e venda por produto) só entra quando `paidAt < startMs`. O
+// contador `orders:paid` etc. não precisa disso porque o snapshot usa valor
+// ABSOLUTO (`setCounter`), nunca delta.
 // ─────────────────────────────────────────────────────────────
 
 const MAX_DOCS_PER_RUN = 500;
@@ -40,6 +48,19 @@ export const backfill = internalMutation({
   },
   handler: async (ctx, { restart, cursor, batch, snapshotCounters }) => {
     const size = Math.max(1, Math.min(batch ?? 100, 200));
+
+    // Idempotência: um backfill CONCLUÍDO não roda de novo.
+    //
+    // Sem esta guarda, repetir a chamada sem `restart` varria o mesmo intervalo
+    // outra vez e SOMAVA de novo os mesmos pedidos nos buckets diários e de
+    // produto (os contadores não, porque usam valor absoluto) — receita em
+    // dobro sem nenhum aviso. A retomada legítima (passar o `nextCursor`
+    // enquanto `done` é false) continua funcionando igual: cada lote só é
+    // processado uma vez. Para reconstruir do zero, use `restart: true`, que
+    // limpa apenas as tabelas derivadas.
+    if ((await readCounter(ctx, COUNTER_KEYS.statsRollups)) === 1 && !restart) {
+      return { scanned: 0, days: 0, products: 0, done: true, nextCursor: null, alreadyDone: true };
+    }
 
     let startMs = await readCounter(ctx, COUNTER_KEYS.statsRollupStart);
 
@@ -83,6 +104,8 @@ export const backfill = internalMutation({
       );
     }
 
+    const startedAt = startMs;
+
     // Só pedidos anteriores ao início do backfill (os novos são dos hooks).
     // UMA paginação por execução (limite do Convex), com cursor opaco.
     const result = await ctx.db
@@ -108,6 +131,10 @@ export const backfill = internalMutation({
       days.set(created, d);
 
       if (order.paymentStatus !== "paid") continue;
+      // Pago ANTES do início do backfill? Só assim o backfill conta o pagamento;
+      // um pagamento posterior a `startedAt` já foi contado pelo hook
+      // incremental e contá-lo aqui dobraria a receita do dia.
+      if ((order.paidAt ?? order.createdAt) >= startedAt) continue;
       const paidDay = dayKey(order.paidAt ?? order.createdAt);
       const p = days.get(paidDay) ?? { ordersCreated: 0, paidOrders: 0, paidRevenueCents: 0 };
       p.paidOrders += 1;

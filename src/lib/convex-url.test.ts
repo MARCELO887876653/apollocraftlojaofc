@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  RETIRED_DEPLOYMENTS,
   STORE_DEPLOYMENT_URL,
   configuredConvexUrl,
   convexUrlCandidates,
   deploymentServesStore,
+  isRetiredDeployment,
 } from "./convex-url";
 
 describe("configuredConvexUrl", () => {
@@ -37,11 +39,30 @@ describe("convexUrlCandidates", () => {
   });
 
   it("quando o build aponta para outro deployment, tenta ele antes do da loja", () => {
-    // Este é o caso que deixava o app publicado carregando para sempre.
-    const candidates = convexUrlCandidates("https://tidy-mandrill-432.convex.cloud");
-    expect(candidates).toEqual(["https://tidy-mandrill-432.convex.cloud", STORE_DEPLOYMENT_URL]);
+    const candidates = convexUrlCandidates("https://loja-nova.convex.cloud");
+    expect(candidates).toEqual(["https://loja-nova.convex.cloud", STORE_DEPLOYMENT_URL]);
     expect(candidates[candidates.length - 1]).toBe(STORE_DEPLOYMENT_URL);
     expect(new Set(candidates).size).toBe(candidates.length);
+  });
+
+  it("nunca tenta um deployment aposentado — nem uma vez", () => {
+    // O caso real (medido no deployment): um build saiu com
+    // `tidy-mandrill-432` embutido. Antes, toda visita gastava um WebSocket que
+    // nunca conectava + um POST de diagnóstico que voltava 500 antes de cair no
+    // endereço certo. Agora o endereço morto é simplesmente pulado.
+    for (const retired of RETIRED_DEPLOYMENTS) {
+      expect(convexUrlCandidates(retired)).toEqual([STORE_DEPLOYMENT_URL]);
+      expect(convexUrlCandidates(`${retired}/`)).toEqual([STORE_DEPLOYMENT_URL]);
+      expect(convexUrlCandidates(retired)).not.toContain(retired);
+    }
+  });
+});
+
+describe("isRetiredDeployment", () => {
+  it("reconhece os endereços aposentados e ignora os demais", () => {
+    expect(isRetiredDeployment("https://tidy-mandrill-432.convex.cloud")).toBe(true);
+    expect(isRetiredDeployment(STORE_DEPLOYMENT_URL)).toBe(false);
+    expect(isRetiredDeployment("https://loja-nova.convex.cloud")).toBe(false);
   });
 });
 

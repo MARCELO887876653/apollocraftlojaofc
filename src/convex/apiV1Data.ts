@@ -6,7 +6,7 @@ import { generateClaimToken } from "./lib/hash";
 import { API_SCOPES } from "./lib/apiSchema";
 import { syncChangesCore } from "./apiV1Sync";
 import { listQueuedCore } from "./deliveryCommands";
-import { moveQueueCount } from "./lib/queueStats";
+import { moveQueueCount, readQueueCounts } from "./lib/queueStats";
 import {
   DELIVERY_EVENT,
   logDeliveryEvent,
@@ -28,6 +28,16 @@ const HEARTBEAT_ONLINE_MS = 90 * 1000; // considerado online nos últimos 90s
 // deployment: 3.000 linhas em 56 horas, todas de sucesso). Erros continuam
 // sendo registrados individualmente.
 const LOG_SAMPLE_MS = 10 * 60 * 1000;
+
+// Janela de deduplicação de ERRO repetido em `apiLogs` (por chave + bucket).
+//
+// Por quê: um addon mal configurado (scope errado, chave revogada) martela a
+// rota a cada ~10s e cada tentativa virava uma linha nova em `apiLogs` —
+// ~8.640 linhas/dia por causa de UM defeito de configuração. Agora a repetição
+// idêntica (mesma rota + status + mensagem) dentro desta janela não cria linha
+// nova. O primeiro erro de cada janela continua registrado, então o diagnóstico
+// e a auditoria não perdem nada; o que sai é o ruído. Nenhum log é apagado.
+const ERROR_LOG_DEDUP_MS = 5 * 60 * 1000;
 
 // Códigos de erro semânticos aceitos na confirmação (PATCH command).
 export const ERROR_CODES = {
@@ -213,6 +223,11 @@ async function authorizeRequest(ctx: MutationCtx, args: AuthorizeArgs) {
       createdAt: key.createdAt,
     },
     rate,
+    // Estado do documento de rate limit desta chamada: permite gravar a amostra
+    // de log e deduplicar erro repetido sem nenhuma leitura extra.
+    rateDocId,
+    lastErrorSignature: doc?.lastErrorSignature,
+    lastErrorAt: doc?.lastErrorAt,
   };
 }
 
@@ -251,6 +266,23 @@ export async function claimForAddon(
 ) {
     const now = Date.now();
     const lease = leaseMs ?? CLAIM_LEASE_MS;
+
+    // 0) Fila vazia: não varre nada.
+    //
+    // Medido no deployment: o addon chama este endpoint ~5x por minuto e a
+    // fila passa a maior parte do tempo em zero (pending=0, processing=0,
+    // failed=0 — conferido em `deliveryQueueStats`). Os contadores são
+    // ajustados na MESMA transação de cada mudança de status (lib/queueStats),
+    // então com os três em zero não existe entrega a reservar e não existe
+    // claim a expirar. Sair aqui evita 4–6 leituras de índice por chamada
+    // ociosa, sem mudar nada quando há trabalho.
+    //
+    // Se o documento de contadores ainda não existir (`null` — primeira vez
+    // após o deploy), seguimos pelo caminho completo de antes.
+    const counts = await readQueueCounts(ctx);
+    if (counts && counts.pending === 0 && counts.processing === 0 && counts.failed === 0) {
+      return [];
+    }
 
     // 1) libera claims expirados (addon caiu depois de pegar a entrega)
     // PROCESSING é limitado ao que está em voo (lease de 5 min), então aqui a
@@ -494,7 +526,21 @@ export const internalAuthorizedCall = internalMutation({
     }
 
     // Mesma ordem da rota antiga: rate limit ANTES do scope.
+    //
+    // Erro repetido NÃO vira linha nova dentro da janela de deduplicação (ver
+    // ERROR_LOG_DEDUP_MS): o addon que martela a rota com o mesmo defeito deixa
+    // de encher `apiLogs` de linhas idênticas. Nada é apagado — o primeiro erro
+    // de cada janela continua registrado.
     const logFailure = async (statusCode: number, error: string) => {
+      const now = Date.now();
+      const signature = `${args.path}|${statusCode}|${error}`;
+      const repeated =
+        auth.rateDocId !== undefined &&
+        auth.lastErrorSignature === signature &&
+        auth.lastErrorAt !== undefined &&
+        now - auth.lastErrorAt < ERROR_LOG_DEDUP_MS;
+      if (repeated) return;
+
       await ctx.db.insert("apiLogs", {
         apiKeyId: key.id,
         serverId: key.serverId,
@@ -505,8 +551,14 @@ export const internalAuthorizedCall = internalMutation({
         durationMs: 0,
         ip: args.ip,
         error,
-        createdAt: Date.now(),
+        createdAt: now,
       });
+      if (auth.rateDocId) {
+        await ctx.db.patch(auth.rateDocId, {
+          lastErrorSignature: signature,
+          lastErrorAt: now,
+        });
+      }
     };
     if (!auth.rate.allowed) {
       await logFailure(429, "rate limit");

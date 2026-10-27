@@ -1,8 +1,9 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
-import { v } from "convex/values";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { auth } from "./auth";
+import { sha256Hex, tokenPrefix } from "./lib/hash";
+import { hotRouteResponse, resolveHotRoute } from "./lib/apiV1HotRoute";
 
 const http = httpRouter();
 
@@ -136,6 +137,71 @@ const apiV1 = httpAction(async (ctx, request) => {
     : undefined;
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
   const idempotencyKey = request.headers.get("idempotency-key") ?? undefined;
+
+  // ── Rotas quentes: autenticação + trabalho numa ÚNICA mutation ──
+  //
+  // O Convex cobra por chamada de função. Antes, uma requisição do addon
+  // custava TRÊS: este httpAction, a action `apiV1.handle` (que só roteava e
+  // traduzia a resposta) e a mutation `internalAuthorizedCall`. Chamando a
+  // mutation direto daqui, a mesma requisição custa DUAS. É o caso de
+  // `sync/changes`, `queued_commands`, `queued_commands/claim` e `heartbeat`.
+  //
+  // Nada de segurança muda: a mutation continua checando hash da chave,
+  // revogação, prefixo do token, rate limit, `lastUsedAt` e scope. O roteamento
+  // vem do MESMO resolvedor puro usado pela action (lib/apiV1HotRoute), então
+  // não há regra duplicada. Corpo inválido, token ausente ou autenticação
+  // ambígua caem no caminho antigo (`apiV1.handle`), com a resposta idêntica.
+  const hot =
+    token && !ambiguousAuth
+      ? resolveHotRoute({
+          method: request.method,
+          path: url.pathname,
+          query,
+          bodyText,
+        })
+      : null;
+  if (hot) {
+    try {
+      const res = await ctx.runMutation(internal.apiV1Data.internalAuthorizedCall, {
+        hash: sha256Hex(token),
+        expectedPrefix: tokenPrefix(token),
+        tokenIsLive: token.startsWith("sk_live_"),
+        bucket: hot.bucket,
+        rateLimit: hot.rateLimit,
+        windowMs: hot.windowMs,
+        method: request.method,
+        path: url.pathname,
+        ip,
+        kind: hot.kind,
+        ...hot.args,
+      });
+      const out = hotRouteResponse(res);
+      return Response.json(out.body ?? {}, {
+        status: out.status,
+        headers: { ...out.headers, ...corsHeaders(request) },
+      });
+    } catch (e: any) {
+      console.error("[api/v1] hot route error:", e);
+      // Mesmo desfecho do caminho antigo: registra o erro e responde 500.
+      try {
+        await ctx.runMutation(internal.apiV1Data.internalLog, {
+          endpoint: url.pathname,
+          method: request.method,
+          statusCode: 500,
+          durationMs: 0,
+          ip,
+          error: e?.message ?? "internal error",
+        });
+      } catch {
+        // o log nunca derruba a resposta
+      }
+      return Response.json(
+        { errors: [{ message: "Erro interno no servidor.", code: "INTERNAL_ERROR" }] },
+        { status: 500, headers: corsHeaders(request) },
+      );
+    }
+  }
+
   try {
     const result = await ctx.runAction(api.apiV1.handle, {
       method: request.method,

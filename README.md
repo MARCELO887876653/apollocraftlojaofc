@@ -182,6 +182,12 @@ Regras validadas com medição no deployment (não são teoria):
   para ele vai direto ao deployment da loja, sem WebSocket que nunca conecta e
   sem POST de diagnóstico 500 antes de trocar. `VITE_CONVEX_URL` continua
   mandando quando aponta para um endereço válido.
+- **O build resolve o endereço e grava a constante.** `vite.config.ts` lê
+  `VITE_CONVEX_URL` (arquivo e ambiente do provedor), aplica
+  `resolveBuildConvexUrl` e define `__CONVEX_BUILD_URL__` no bundle. Endereço
+  aposentado ou ausente vira `capable-akita-865` já no build, com aviso no log;
+  o HTML publicado não embute mais o endereço morto. A injeção da bio do link
+  usa o MESMO endereço resolvido (antes podia tentar o morto primeiro).
 
 ### Rollups de estatísticas (backfill único)
 
@@ -247,9 +253,13 @@ tráfego.
 
 ### Pendências que dependem de autorização
 
-1. **`VITE_CONVEX_URL` do build.** O código já ignora o endereço aposentado, mas
-   o ideal é o próximo build nascer apontando para `capable-akita-865`. Isso é
-   configuração do provedor de build (Keys/variáveis), não do repositório.
+1. **`VITE_CONVEX_URL` do provedor.** O valor atual configurado é
+   `https://tidy-mandrill-432.convex.cloud` (comprovado no bundle publicado:
+   `convexUrlCandidates("https://tidy-mandrill-432.convex.cloud")`). O build já
+   corrige isso sozinho, mas o certo é trocar a variável para
+   `https://capable-akita-865.convex.cloud` nas Keys/variáveis do provedor. Sem
+   uma nova publicação, o site continua servindo o bundle antigo (que gasta uma
+   tentativa inútil por visita antes do fallback).
 2. **Backfill dos rollups.** Continua NÃO executado (`statsRollups:status` →
    `ready: false`). Enquanto isso o painel usa o caminho de varredura.
 3. **Retenção.** Hoje a prévia mostra **0 candidatos** em `apiLogs`,

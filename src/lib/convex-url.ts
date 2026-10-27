@@ -80,6 +80,28 @@ export function convexUrlCandidates(raw?: string | null): string[] {
   return configured === STORE_DEPLOYMENT_URL ? [configured] : [configured, STORE_DEPLOYMENT_URL];
 }
 
+/**
+ * Endereço RESOLVIDO no build (usado por `vite.config.ts` para gravar a
+ * constante `__CONVEX_BUILD_URL__` no bundle).
+ *
+ * Diferença para `convexUrlCandidates`: aqui a escolha é feita UMA vez, no
+ * build, e nunca sobra um endereço aposentado nem ausente no código publicado.
+ * Assim o visitante não paga nem uma tentativa de WebSocket para descobrir que
+ * o endereço antigo morreu.
+ *
+ * A ordem é a mesma do runtime: o primeiro valor válido e não aposentado
+ * (arquivo .env, variável do provedor); se não houver nenhum, o deployment
+ * desta loja. Um endereço novo e válido continua mandando — só o quebrado é
+ * descartado.
+ */
+export function resolveBuildConvexUrl(...raw: Array<string | null | undefined>): string {
+  for (const value of raw) {
+    const url = configuredConvexUrl(value);
+    if (url && !isRetiredDeployment(url)) return url;
+  }
+  return STORE_DEPLOYMENT_URL;
+}
+
 /** Tempo máximo do teste abaixo — o normal é responder em menos de 100ms. */
 const PROBE_TIMEOUT_MS = 4000;
 

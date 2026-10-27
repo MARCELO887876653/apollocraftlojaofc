@@ -2,13 +2,13 @@ import { vlyPlugin } from "@vly-ai/integrations";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import {
   fetchShareMetaPayload,
   injectShareMetaBlock,
   renderShareMetaBlock,
 } from "./src/lib/shareMetaHtml";
-import { convexUrlCandidates } from "./src/lib/convex-url";
+import { resolveBuildConvexUrl } from "./src/lib/convex-url";
 
 /**
  * Grava a bio do link (painel → Configurações → Bio do link) no `index.html`
@@ -24,7 +24,7 @@ import { convexUrlCandidates } from "./src/lib/convex-url";
  * Se o Convex não responder (build offline, timeout), o HTML que já está no
  * arquivo é mantido e o build segue — nunca publicamos um `<head>` vazio.
  */
-function seoShareMetaPlugin(): Plugin {
+function seoShareMetaPlugin(buildConvexUrl: string): Plugin {
   return {
     name: "seo-share-meta",
     // Somente no build: no dev o HTML é servido a cada request e não faz sentido
@@ -33,45 +33,66 @@ function seoShareMetaPlugin(): Plugin {
     transformIndexHtml: {
       order: "pre",
       async handler(html) {
-        const candidates = convexUrlCandidates(process.env.VITE_CONVEX_URL);
-        for (const url of candidates) {
-          try {
-            const payload = await fetchShareMetaPayload(url);
-            const next = injectShareMetaBlock(
-              html,
-              renderShareMetaBlock(payload, url),
-            );
-            if (!next) {
-              this.warn("index.html sem os marcadores seo:link-preview — bio não injetada.");
-              return html;
-            }
-            this.info(
-              `bio do link: "${payload.meta.title}"` +
-                (payload.meta.image ? " (com capa)" : " (sem capa)"),
-            );
-            return next;
-          } catch (error) {
-            // Tenta o próximo endereço; o último erro fica no aviso abaixo.
-            if (url === candidates[candidates.length - 1]) {
-              this.warn(
-                `não foi possível ler a bio do link (${error instanceof Error ? error.message : error}). ` +
-                  "O HTML do repositório foi mantido — pode estar desatualizado.",
-              );
-            }
+        // Um único endereço: o MESMO resolvido para o bundle. Antes, o build
+        // podia tentar primeiro o endereço morto do .env — gastando uma
+        // requisição que já se sabia fadada a falhar.
+        try {
+          const payload = await fetchShareMetaPayload(buildConvexUrl);
+          const next = injectShareMetaBlock(
+            html,
+            renderShareMetaBlock(payload, buildConvexUrl),
+          );
+          if (!next) {
+            this.warn("index.html sem os marcadores seo:link-preview — bio não injetada.");
+            return html;
           }
+          this.info(
+            `bio do link: "${payload.meta.title}"` +
+              (payload.meta.image ? " (com capa)" : " (sem capa)"),
+          );
+          return next;
+        } catch (error) {
+          this.warn(
+            `não foi possível ler a bio do link (${error instanceof Error ? error.message : error}). ` +
+              "O HTML do repositório foi mantido — pode estar desatualizado.",
+          );
+          return html;
         }
-        return html;
       },
     },
   };
 }
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Endereço do Convex GRAVADO no bundle (constante `__CONVEX_BUILD_URL__`).
+  //
+  // Por que não confiar direto em `import.meta.env.VITE_CONVEX_URL`: um build
+  // publicado saiu com `tidy-mandrill-432` (deployment que não serve esta
+  // loja), e todo visitante pagava uma tentativa de WebSocket + um POST de
+  // diagnóstico 500 antes de o app cair no deployment certo. Aqui o valor é
+  // resolvido no build: endereço aposentado/ausente nunca entra no bundle e o
+  // fallback deixa de ser necessário. Um endereço NOVO e válido continua
+  // mandando — nada muda para quem muda de deployment de propósito.
+  const env = loadEnv(mode, process.cwd(), "");
+  const buildConvexUrl = resolveBuildConvexUrl(env.VITE_CONVEX_URL, process.env.VITE_CONVEX_URL);
+  const configured = env.VITE_CONVEX_URL ?? process.env.VITE_CONVEX_URL;
+  if (configured && configured.trim() && configured.trim().replace(/\/+$/, "") !== buildConvexUrl) {
+    console.warn(
+      `[convex] VITE_CONVEX_URL aponta para um endereço aposentado/inválido; ` +
+        `o bundle usará ${buildConvexUrl}. Corrija a variável no provedor de build.`,
+    );
+  }
+
+  return {
   // NOTA: o vlyPlugin() (preview/captura de tela) foi removido do build de
   // produção por segurança (S1/S4 da auditoria). A toolbar de preview continua
   // disponível em desenvolvimento via `VlyToolbar` no src/main.tsx.
-  plugins: [react(), tailwindcss(), seoShareMetaPlugin()],
+  plugins: [react(), tailwindcss(), seoShareMetaPlugin(buildConvexUrl)],
+  // Constante de build consumida por src/main.tsx (ver src/vite-env.d.ts).
+  define: {
+    __CONVEX_BUILD_URL__: JSON.stringify(buildConvexUrl),
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -137,4 +158,5 @@ export default defineConfig({
       overlay: false,
     },
   },
+  };
 });

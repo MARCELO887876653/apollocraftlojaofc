@@ -6,6 +6,7 @@ import {
   convexUrlCandidates,
   deploymentServesStore,
   isRetiredDeployment,
+  resolveBuildConvexUrl,
 } from "./convex-url";
 
 describe("configuredConvexUrl", () => {
@@ -55,6 +56,35 @@ describe("convexUrlCandidates", () => {
       expect(convexUrlCandidates(`${retired}/`)).toEqual([STORE_DEPLOYMENT_URL]);
       expect(convexUrlCandidates(retired)).not.toContain(retired);
     }
+  });
+});
+
+describe("resolveBuildConvexUrl", () => {
+  it("grava no bundle o endereço válido configurado", () => {
+    expect(resolveBuildConvexUrl("https://loja-nova.convex.cloud")).toBe(
+      "https://loja-nova.convex.cloud",
+    );
+    expect(resolveBuildConvexUrl(STORE_DEPLOYMENT_URL)).toBe(STORE_DEPLOYMENT_URL);
+  });
+
+  it("descarta o endereço aposentado: o build nunca nasce com ele", () => {
+    expect(resolveBuildConvexUrl("https://tidy-mandrill-432.convex.cloud")).toBe(
+      STORE_DEPLOYMENT_URL,
+    );
+    expect(resolveBuildConvexUrl("https://tidy-mandrill-432.convex.cloud/")).toBe(
+      STORE_DEPLOYMENT_URL,
+    );
+  });
+
+  it("usa o deployment da loja quando não há configuração válida", () => {
+    expect(resolveBuildConvexUrl(undefined)).toBe(STORE_DEPLOYMENT_URL);
+    expect(resolveBuildConvexUrl(null, "  ", "nao-e-url")).toBe(STORE_DEPLOYMENT_URL);
+  });
+
+  it("ignora valores inválidos antes de aceitar o primeiro válido", () => {
+    expect(
+      resolveBuildConvexUrl(undefined, "https://tidy-mandrill-432.convex.cloud", undefined),
+    ).toBe(STORE_DEPLOYMENT_URL);
   });
 });
 

@@ -223,7 +223,7 @@ class RootErrorBoundary extends React.Component<
  * variável apontando para um deployment antigo deixava todas as telas
  * carregando para sempre.
  */
-const CONVEX_URLS = convexUrlCandidates(import.meta.env.VITE_CONVEX_URL as string | undefined);
+const CONVEX_URLS = convexUrlCandidates(__CONVEX_BUILD_URL__);
 
 /**
  * Dono da conexão Convex: tenta o endereço do build e, se ele não conectar,

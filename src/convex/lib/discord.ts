@@ -101,7 +101,10 @@ export function discordAuthorizeUrl(input: {
   url.searchParams.set("state", input.state);
   url.searchParams.set("code_challenge", input.codeChallenge);
   url.searchParams.set("code_challenge_method", "S256");
-  url.searchParams.set("prompt", "consent");
+  // Sem `prompt=consent`: ele forçava a tela de consentimento a cada login,
+  // inclusive para quem já autorizou a loja — no app do Discord no celular
+  // esse retorno extra era justamente onde o `code` se perdia. Quem autoriza
+  // pela primeira vez continua vendo o consentimento normalmente.
   return url.toString();
 }
 

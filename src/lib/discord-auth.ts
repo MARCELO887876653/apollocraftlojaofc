@@ -106,9 +106,31 @@ export type DiscordCallback =
   /** `missing` = a URL voltou sem NENHUM parâmetro (nem erro, nem código). */
   | { kind: "error"; message: string; missing?: boolean };
 
+/**
+ * Parâmetros da volta do Discord.
+ *
+ * O normal é tudo na query (`?code=…`), mas o app/navegador do Discord no
+ * celular às vezes entrega parte dos parâmetros depois do `#`. Lemos os dois:
+ * query primeiro, fragmento só para o que faltar. Assim um `code` que caiu no
+ * fragmento ainda entra, em vez de virar "não veio código".
+ */
+function callbackParams(raw: string): URLSearchParams {
+  const value = raw.replace(/^\?/, "");
+  const hashAt = value.indexOf("#");
+  const query = hashAt >= 0 ? value.slice(0, hashAt) : value;
+  const hash = hashAt >= 0 ? value.slice(hashAt + 1).replace(/^\?/, "") : "";
+  const params = new URLSearchParams(query);
+  if (hash) {
+    for (const [key, val] of new URLSearchParams(hash)) {
+      if (!params.has(key)) params.set(key, val);
+    }
+  }
+  return params;
+}
+
 /** Traduz a query string devolvida pelo Discord (sempre em pt-BR). */
 export function readDiscordCallback(search: string): DiscordCallback {
-  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const params = callbackParams(search);
   const error = params.get("error");
   if (error) {
     if (error === "access_denied") {
@@ -125,13 +147,31 @@ export function readDiscordCallback(search: string): DiscordCallback {
     // Sem parâmetro nenhum: o navegador abriu /auth/discord direto (link
     // antigo, recarregou a página, ou o Discord devolveu para outro endereço
     // registrado). Dizemos isso em vez de culpar o Discord pelo código.
-    const empty = [...params.keys()].length === 0;
+    const keys = [...params.keys()];
+    if (keys.length === 0) {
+      return {
+        kind: "error",
+        missing: true,
+        message:
+          "Esta página abriu sem os dados da volta do Discord — o login não chegou a ser concluído nesta aba.",
+      };
+    }
+    if (params.has("code")) {
+      return {
+        kind: "error",
+        missing: false,
+        message:
+          "O Discord devolveu um código vazio. Toque em \"Entrar com Discord\" novamente para gerar outro.",
+      };
+    }
+    // Nomes (nunca valores) do que chegou: sem isso, "não veio o código" não
+    // permite descobrir se o retorno veio só com `iss` ou com outro parâmetro.
     return {
       kind: "error",
-      missing: empty,
-      message: empty
-        ? "Esta página abriu sem os dados da volta do Discord — o login não chegou a ser concluído nesta aba."
-        : "O Discord não devolveu o código de acesso. Toque em \"Entrar com Discord\" novamente.",
+      missing: false,
+      message: `O Discord não devolveu o código de acesso (recebemos: ${keys.join(
+        ", ",
+      )}). Toque em "Entrar com Discord" novamente.`,
     };
   }
   return { kind: "code", code, state: params.get("state") };

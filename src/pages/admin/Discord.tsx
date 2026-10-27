@@ -125,7 +125,9 @@ export default function AdminDiscord() {
     setTesting(true);
     setResult(null);
     try {
-      const response = await test({});
+      // Passa a origem real: o teste confere também se o endereço de retorno
+      // desta loja abre (o Discord não expõe a lista de redirects registrados).
+      const response = await test({ origin: window.location.origin });
       setResult({ ok: response.ok, message: response.message });
     } catch (e) {
       setResult({

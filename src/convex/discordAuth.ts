@@ -5,7 +5,9 @@ import { requireAdmin, logAudit } from "./lib/admin";
 import { getSetting, setSetting } from "./lib/data";
 import {
   DISCORD_API,
+  discordRedirectUri,
   discordStatus,
+  isAllowedRedirectUri,
   normalizeClientId,
   normalizeClientSecret,
   type DiscordStatus,
@@ -188,10 +190,15 @@ export const internalUserIdByEmail = internalQuery({
   },
 });
 
-/** Valida o par Client ID/Secret perguntando ao próprio Discord. */
+/**
+ * Valida o par Client ID/Secret perguntando ao próprio Discord e confere se o
+ * endereço de retorno desta loja está no ar. O teste NÃO consegue ler a lista
+ * de redirects registrados no app (o Discord não expõe isso), mas deixa de
+ * dar "tudo certo" quando o domínio/caminho nem responde.
+ */
 export const testCredentials = action({
-  args: {},
-  handler: async (ctx) => {
+  args: { origin: v.optional(v.string()) },
+  handler: async (ctx, { origin }) => {
     // O ctx de action não tem banco: a checagem de admin vem pela query.
     await ctx.runQuery(api.discordAuth.adminGet, {});
     const config: DiscordAuthConfig = await ctx.runQuery(
@@ -236,13 +243,45 @@ export const testCredentials = action({
         return { ok: false, message: `Credenciais válidas, mas o Discord devolveu HTTP ${meRes.status} ao ler o aplicativo.` };
       }
       const me = (await meRes.json()) as { application?: { name?: string; id?: string } };
+
+      // Confere o endereço de retorno que o login realmente usa. Se o domínio
+      // estiver errado (ex.: www sem DNS) ou o caminho não abrir, isso aparece
+      // aqui — e não só quando o cliente tenta entrar.
+      const redirectUri =
+        origin && isAllowedRedirectUri(discordRedirectUri(origin))
+          ? discordRedirectUri(origin)
+          : null;
+      let redirectCheck: { ok: boolean; status: number | null; message: string } | null = null;
+      if (redirectUri) {
+        try {
+          const res = await fetch(redirectUri, { method: "GET", redirect: "follow" });
+          redirectCheck = res.ok
+            ? { ok: true, status: res.status, message: `O endereço de retorno respondeu HTTP ${res.status}.` }
+            : {
+                ok: false,
+                status: res.status,
+                message: `O endereço de retorno respondeu HTTP ${res.status} — o login não abriria a loja nesse caminho.`,
+              };
+        } catch (error) {
+          redirectCheck = {
+            ok: false,
+            status: null,
+            message: `Não foi possível abrir o endereço de retorno (${
+              error instanceof Error ? error.message : String(error)
+            }).`,
+          };
+        }
+      }
+
       return {
         ok: true,
-        // Aviso explícito: este teste NÃO valida o endereço de retorno — foi
-        // exatamente o que fez "Testar credenciais" passar com o login quebrado.
-        message: `Credenciais válidas${me.application?.name ? ` — aplicativo "${me.application.name}"` : ""}. O login ainda depende do endereço de retorno registrado em OAuth2 → Redirects.`,
+        message: `Credenciais válidas${me.application?.name ? ` — aplicativo "${me.application.name}"` : ""}.${
+          redirectCheck ? ` ${redirectCheck.message}` : ""
+        } O Discord ainda precisa ter esse endereço registrado em OAuth2 → Redirects (o teste não consegue ler essa lista).`,
         application: me.application?.name ?? null,
         applicationId: me.application?.id ?? null,
+        redirectUri,
+        redirectCheck,
       };
     } catch (error) {
       return {

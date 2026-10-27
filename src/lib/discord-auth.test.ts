@@ -148,5 +148,33 @@ describe("volta do Discord", () => {
     expect(result.kind).toBe("error");
     expect(result.kind === "error" && result.message).toContain("código de acesso");
     expect(result.kind === "error" && result.missing).toBe(false);
+    // Diagnóstico: mostra o NOME do que chegou (o Discord hoje manda `iss`).
+    expect(result.kind === "error" && result.message).toContain("state");
+  });
+
+  test("lê o código mesmo quando ele caiu no fragmento (retorno do app no celular)", () => {
+    expect(readDiscordCallback("?iss=https%3A%2F%2Fdiscord.com#code=abc&state=s1")).toEqual({
+      kind: "code",
+      code: "abc",
+      state: "s1",
+    });
+    expect(readDiscordCallback("#code=abc&state=s1")).toEqual({
+      kind: "code",
+      code: "abc",
+      state: "s1",
+    });
+  });
+
+  test("só `iss` sem código vira erro com o nome do parâmetro recebido", () => {
+    const result = readDiscordCallback("?iss=https%3A%2F%2Fdiscord.com");
+    expect(result.kind).toBe("error");
+    expect(result.kind === "error" && result.missing).toBe(false);
+    expect(result.kind === "error" && result.message).toContain("iss");
+  });
+
+  test("código vazio tem mensagem própria (não é o caso de página vazia)", () => {
+    const result = readDiscordCallback("?code=&state=s1");
+    expect(result.kind).toBe("error");
+    expect(result.kind === "error" && result.message).toContain("código vazio");
   });
 });

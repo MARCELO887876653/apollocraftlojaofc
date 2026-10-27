@@ -1,7 +1,7 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/convex/_generated/api";
@@ -35,7 +35,7 @@ type PublicDiscord = { enabled: boolean; clientId: string | null } | undefined;
  * próprio botão para recomeçar o login.
  */
 export default function DiscordCallbackPage() {
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { signIn } = useAuthActions();
   const navigate = useNavigate();
   // Nome e logo vêm do shell da loja (sem consulta extra nesta tela).
@@ -43,15 +43,22 @@ export default function DiscordCallbackPage() {
   const discord = useQuery(api.discordAuth.getPublicConfig) as PublicDiscord;
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
+  // Voltou do Discord com parâmetro mas sem código: pode ser um soluço do
+  // retorno (app no celular). Nesse caso tentamos o login de novo UMA vez.
+  const [retryable, setRetryable] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const autoRetried = useRef(false);
   // StrictMode monta o componente duas vezes em desenvolvimento; o código do
   // Discord só pode ser trocado UMA vez, então a troca roda só na primeira.
   const started = useRef(false);
 
   const finish = useCallback(async () => {
-    const callback = readDiscordCallback(searchParams.toString());
+    // Query + fragmento: o retorno do app do Discord no celular às vezes deixa
+    // parte dos parâmetros depois do `#`.
+    const callback = readDiscordCallback(location.search + location.hash);
     if (callback.kind !== "code") {
       setMissing(callback.kind === "error" && callback.missing === true);
+      setRetryable(callback.kind === "error" && callback.missing !== true);
       setError(callback.message);
       return;
     }
@@ -80,7 +87,7 @@ export default function DiscordCallbackPage() {
           : "Não foi possível entrar com o Discord. Tente novamente.",
       );
     }
-  }, [navigate, searchParams, signIn]);
+  }, [navigate, location.search, location.hash, signIn]);
 
   useEffect(() => {
     if (started.current) return;
@@ -89,7 +96,7 @@ export default function DiscordCallbackPage() {
   }, [finish]);
 
   // Recomeça o login daqui mesmo, sem obrigar a pessoa a achar a tela de entrada.
-  const restart = async () => {
+  const restart = useCallback(async () => {
     if (!discord?.clientId) return;
     setRestarting(true);
     try {
@@ -103,7 +110,21 @@ export default function DiscordCallbackPage() {
     } catch {
       setRestarting(false);
     }
-  };
+  }, [discord?.clientId]);
+
+  // Uma segunda chance automática: se o Discord voltou com o `state` mas sem o
+  // `code`, repetimos o pedido uma vez (o cooldown de 20s evita laço entre as
+  // duas idas ao Discord). Se voltar sem código de novo, a tela mostra o
+  // diagnóstico com os parâmetros recebidos.
+  useEffect(() => {
+    if (!retryable || autoRetried.current || !discord?.clientId) return;
+    const KEY = "apollo:discord-retry-at";
+    const last = Number(sessionStorage.getItem(KEY) ?? 0);
+    if (Date.now() - last < 20_000) return;
+    autoRetried.current = true;
+    sessionStorage.setItem(KEY, String(Date.now()));
+    void restart();
+  }, [retryable, discord?.clientId, restart]);
 
   const canRestart = Boolean(discord?.enabled && discord.clientId);
   const redirectUri = discordRedirectUri(window.location.origin);

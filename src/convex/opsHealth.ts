@@ -121,21 +121,36 @@ export const report = internalQuery({
     // única medida de requisições que não passa pela amostragem do log.
     const rateDocs = await ctx.db.query("rateLimits").collect();
     const apiRateDocs = rateDocs.filter((d) => d.key.startsWith("apiv1:"));
+    // A taxa sai da ÚLTIMA JANELA COMPLETA (início→início), nunca de uma janela
+    // recém-aberta: com 2 segundos de janela, 1 chamada virava "30/min" e o
+    // aviso disparava sem que nada estivesse errado. Sem janela fechada ainda
+    // (primeiro minuto após o deploy), `perMinute` fica `null` e não há palpite.
     const liveWindows = apiRateDocs
       .map((d) => {
         const elapsedSec = Math.max(1, (now - d.windowStart) / 1000);
+        const closedSec =
+          d.prevWindowStart !== undefined ? (d.windowStart - d.prevWindowStart) / 1000 : 0;
+        const hasClosed = d.prevCount !== undefined && closedSec >= 15;
+        const perMinute = hasClosed
+          ? Number((((d.prevCount ?? 0) / closedSec) * 60).toFixed(1))
+          : null;
         return {
           key: maskRateKey(d.key),
           requestsInWindow: d.count,
+          requestsInPreviousWindow: hasClosed ? (d.prevCount ?? 0) : null,
           windowStartedAt: new Date(d.windowStart).toISOString(),
           elapsedSec: Math.round(elapsedSec),
-          perMinute: Number(((d.count / elapsedSec) * 60).toFixed(1)),
+          measuredOverSec: hasClosed ? Math.round(closedSec) : null,
+          perMinute,
           lastSampleAt: d.lastSampleAt ? new Date(d.lastSampleAt).toISOString() : null,
           lastErrorAt: d.lastErrorAt ? new Date(d.lastErrorAt).toISOString() : null,
         };
       })
-      .sort((a, b) => b.perMinute - a.perMinute);
-    const requestsPerHour = liveWindows.reduce((s, w) => s + w.perMinute, 0) * 60;
+      .sort((a, b) => (b.perMinute ?? -1) - (a.perMinute ?? -1));
+    const measured = liveWindows.filter((w) => w.perMinute !== null);
+    const requestsPerHour = measured.length
+      ? Math.round(measured.reduce((s, w) => s + (w.perMinute ?? 0), 0) * 60)
+      : null;
 
     // ── Estado dos dados (contadores, fila, addons) ──
     const [ordersTotal, ordersPaid, ordersPending, revenuePaidCents, customersTotal, queue] =
@@ -152,10 +167,10 @@ export const report = internalQuery({
 
     // ── Avisos (texto; nada é bloqueado) ──
     const warnings: { code: string; message: string }[] = [];
-    if (requestsPerHour > THRESHOLDS.requestsPerHour) {
+    if (requestsPerHour !== null && requestsPerHour > THRESHOLDS.requestsPerHour) {
       warnings.push({
         code: "REQUESTS_HIGH",
-        message: `~${Math.round(requestsPerHour)} requisições/hora medidas nas janelas de rate limit (limite de aviso: ${THRESHOLDS.requestsPerHour}).`,
+        message: `~${requestsPerHour} requisições/hora na última janela completa de rate limit (limite de aviso: ${THRESHOLDS.requestsPerHour}).`,
       });
     }
     if (logRowsPerHour > THRESHOLDS.logRowsPerHour) {
@@ -188,7 +203,7 @@ export const report = internalQuery({
       generatedAt: new Date(now).toISOString(),
       sample: { rows: total, cappedAt: MAX_SAMPLE, from: new Date(oldest).toISOString(), to: new Date(newest).toISOString(), hours: Number(hours.toFixed(2)) },
       rates: {
-        requestsPerHour: Math.round(requestsPerHour),
+        requestsPerHour,
         logRowsPerHour: Number(logRowsPerHour.toFixed(2)),
         logRowsLastHour: lastHour,
         errorRate: Number(errorRate.toFixed(4)),

@@ -162,7 +162,15 @@ async function authorizeRequest(ctx: MutationCtx, args: AuthorizeArgs) {
     // carimbar a amostra de log no MESMO documento, sem escrita extra.
     let rateDocId = doc?._id;
     if (!doc || now - doc.windowStart >= args.windowMs) {
-      if (doc) await ctx.db.patch(doc._id, { windowStart: now, count: 1 });
+      // Guarda o fechamento da janela anterior (contagem + início): é a medida
+      // estável usada por `opsHealth:report` para estimar requisições/hora.
+      if (doc)
+        await ctx.db.patch(doc._id, {
+          windowStart: now,
+          count: 1,
+          prevCount: doc.count,
+          prevWindowStart: doc.windowStart,
+        });
       else
         rateDocId = await ctx.db.insert("rateLimits", {
           key: rlKey,

@@ -485,6 +485,11 @@ const schema = defineSchema(
       // linha nova. Campos opcionais — registros antigos seguem válidos.
       lastErrorSignature: v.optional(v.string()),
       lastErrorAt: v.optional(v.number()),
+      // Fechamento da janela anterior (requisições e início). É o que permite
+      // medir a taxa REAL de requisições sem piscar: extrapolar de uma janela
+      // de 2 segundos dava 30/min para 1 chamada. Ver opsHealth:report.
+      prevCount: v.optional(v.number()),
+      prevWindowStart: v.optional(v.number()),
     }).index("by_key", ["key"]),
 
     // ─── Avisos de retorno da loja (modo manutenção) ───

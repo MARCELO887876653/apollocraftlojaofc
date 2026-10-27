@@ -159,6 +159,29 @@ Regras validadas com medição no deployment (não são teoria):
   índice `by_active` na própria mutation: sem webhook ativo inscrito no evento,
   nenhuma action (`webhooksOut.sendEvent`) é agendada. Com webhook configurado o
   comportamento é idêntico ao anterior.
+- **Rota quente do addon custa 2 chamadas, não 3.** O `httpAction` de `http.ts`
+  chama `apiV1Data.internalAuthorizedCall` direto nas quatro rotas do addon
+  (`sync/changes`, `queued_commands`, `queued_commands/claim`, `heartbeat`); a
+  action `apiV1.handle` sobrou só para as demais. O roteamento e a tradução da
+  resposta vivem em `lib/apiV1HotRoute.ts` (funções puras usadas pelos dois
+  caminhos — nenhuma regra duplicada, nenhum check de segurança removido).
+  Medido no deployment: 7 httpActions + 7 mutations e **zero actions
+  intermediárias** = 2,0 chamadas por requisição (antes 3,0). A paridade entre os
+  dois caminhos está fixada em `apiV1Scenarios.test.ts`.
+- **Claim ocioso não varre a fila.** `claimForAddon` lê 1 documento
+  (`deliveryQueueStats`); com `pending`, `processing` e `failed` em zero devolve
+  `[]` na hora. Todo insert e toda mudança de status ajustam esses contadores na
+  MESMA transação (conferido contra a contagem real da tabela), então o atalho
+  não pode “esconder” uma entrega.
+- **Erro repetido não vira log repetido.** Mesma assinatura
+  (rota + status + mensagem) dentro de 5 minutos não cria linha nova em
+  `apiLogs`; erros diferentes continuam entrando um a um. A marca fica na janela
+  de rate limit da própria chave — nenhuma leitura extra.
+- **Endereço morto de deployment é PULADO, não tentado.** `lib/convex-url.ts`
+  mantém `RETIRED_DEPLOYMENTS` (`tidy-mandrill-432`): um build que saiu apontando
+  para ele vai direto ao deployment da loja, sem WebSocket que nunca conecta e
+  sem POST de diagnóstico 500 antes de trocar. `VITE_CONVEX_URL` continua
+  mandando quando aponta para um endereço válido.
 
 ### Rollups de estatísticas (backfill único)
 
@@ -205,6 +228,37 @@ bun convex run retention:purgeFromCli '{"table":"apiLogs","olderThanDays":90,"ma
 
 O retorno traz `deleted`, `skippedLive` e `hasMore`. Repita se `hasMore` for
 true, sempre com autorização explícita.
+
+### Saúde operacional (sob demanda)
+
+Para ver quem está consumindo cota sem esperar o Convex desativar o deployment:
+
+```bash
+bun convex run opsHealth:report '{"sample": 1500}'
+```
+
+O relatório (`src/convex/opsHealth.ts`) **não** tem cron, polling nem assinatura
+de cliente: custo zero enquanto ninguém pede. Ele lê no máximo 3.000 linhas
+recentes de `apiLogs`, as janelas de rate limit (a taxa REAL de requisições do
+minuto), os contadores, a fila e os addons vistos, e devolve avisos em texto
+(`REQUESTS_HIGH`, `LOGS_GROWING`, `ERROR_RATE_HIGH`, `REPEATED_ERROR`,
+`ROLLUPS_PENDING`). Nada é bloqueado nem apagado — nenhum corte automático de
+tráfego.
+
+### Pendências que dependem de autorização
+
+1. **`VITE_CONVEX_URL` do build.** O código já ignora o endereço aposentado, mas
+   o ideal é o próximo build nascer apontando para `capable-akita-865`. Isso é
+   configuração do provedor de build (Keys/variáveis), não do repositório.
+2. **Backfill dos rollups.** Continua NÃO executado (`statsRollups:status` →
+   `ready: false`). Enquanto isso o painel usa o caminho de varredura.
+3. **Retenção.** Hoje a prévia mostra **0 candidatos** em `apiLogs`,
+   `deliveryEvents` e `deliveryAttempts` (nada passou dos prazos). Nenhum registro
+   foi apagado.
+4. **Frequência do addon.** Backoff progressivo, long polling e “poll só quando
+   há comando” só valem com uma **nova versão do addon instalado** — o servidor
+   não pode desacelerar um cliente que já está em campo. As rotas continuam
+   compatíveis com a versão atual (nenhuma mudança de contrato).
 
 Ao criar novas telas, prefira ler de um pacote existente (ou acrescentar campos a ele) em vez de somar mais um `useQuery`.
 

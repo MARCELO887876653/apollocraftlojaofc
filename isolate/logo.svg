@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Apollo Craft">
+  <defs>
+    <linearGradient id="apolloMark" x1="88" y1="56" x2="424" y2="464" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7dd3fc" />
+      <stop offset="0.55" stop-color="#38bdf8" />
+      <stop offset="1" stop-color="#0284c7" />
+    </linearGradient>
+  </defs>
+  <path
+    fill="url(#apolloMark)"
+    d="M256 32c11 108 94 191 224 224-130 33-213 116-224 224-11-108-94-191-224-224C162 223 245 140 256 32Z"
+  />
+</svg>

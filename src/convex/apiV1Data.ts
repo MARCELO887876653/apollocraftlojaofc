@@ -40,7 +40,9 @@ const LOG_SAMPLE_MS = 10 * 60 * 1000;
 const ERROR_LOG_DEDUP_MS = 5 * 60 * 1000;
 
 // Códigos de erro semânticos aceitos na confirmação (PATCH command).
-export const ERROR_CODES = {
+export const OFFLINE_REQUEUE_MS = 2 * 60 * 1000;
+
+const ERROR_CODES = {
   PLAYER_OFFLINE: "PLAYER_OFFLINE",
   HANDLER_NOT_FOUND: "HANDLER_NOT_FOUND",
   REFERENCE_NOT_FOUND: "REFERENCE_NOT_FOUND",
@@ -818,6 +820,11 @@ export const internalConfirm = internalMutation({
     if (status === "PENDING") {
       // devolve para a fila sem consumir tentativa (ex.: jogador offline)
       const isOffline = errorCode === ERROR_CODES.PLAYER_OFFLINE || /PLAYER_OFFLINE/i.test(response ?? "");
+      // Jogador offline NÃO pode voltar para a fila com `executeAt = agora`:
+      // o addon pega de novo em segundos e o ciclo claim → offline → claim
+      // virava um loop infinito (3.371 tentativas no pedido #S9MKLLWD).
+      // Espera 2 min; quando o jogador entrar, a entrega sai no próximo poll.
+      const retryAt = isOffline ? now + OFFLINE_REQUEUE_MS : now;
       await ctx.db.patch(c._id, {
         status: "PENDING",
         response: response ?? ERROR_CODES.PLAYER_OFFLINE,
@@ -825,7 +832,7 @@ export const internalConfirm = internalMutation({
         errorCode: errorCode ?? (isOffline ? ERROR_CODES.PLAYER_OFFLINE : undefined),
         // offline não consome max_attempts: restaura a tentativa consumida no claim
         attempts: isOffline ? Math.max(0, c.attempts - 1) : c.attempts,
-        executeAt: now,
+        executeAt: retryAt,
         retryable: undefined,
         nextAttemptAt: undefined,
         requiresManualIntervention: false,
@@ -961,13 +968,16 @@ async function finishOpenAttempt(
   response?: string,
   reason?: string,
 ) {
-  const attempts = await ctx.db
+  // Leitura LIMITADA às tentativas mais recentes. Antes era `collect()` de
+  // todas: uma entrega presa em PLAYER_OFFLINE acumulou 3.371 tentativas e
+  // cada confirmação relia ~1 MB (3.354 documentos), estourando o limite de
+  // Database I/O do deployment.
+  const recent = await ctx.db
     .query("deliveryAttempts")
     .withIndex("by_delivery", (q: any) => q.eq("deliveryId", deliveryId))
-    .collect();
-  const open = attempts
-    .filter((a: any) => a.finishedAt === undefined)
-    .sort((a: any, b: any) => b.startedAt - a.startedAt)[0];
+    .order("desc")
+    .take(20);
+  const open = recent.find((a: any) => a.finishedAt === undefined);
   const now = Date.now();
   if (open) {
     await ctx.db.patch(open._id, {

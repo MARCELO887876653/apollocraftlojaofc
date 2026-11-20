@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Search, Loader2, Ban, CheckCircle2, PackagePlus, RefreshCw, ScrollText, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Loader2, Ban, CheckCircle2, PackagePlus, RefreshCw, ScrollText, ChevronDown, ChevronUp, Pencil } from "lucide-react";
 
 type Order = {
   _id: string; number: string; customerName: string; customerEmail: string;
@@ -144,6 +144,7 @@ export default function AdminOrders() {
   ) as { order: Order; deliveries: any[] } | undefined;
 
   const updateStatus = useMutation(api.orders.adminUpdateStatus);
+  const updateMinecraftNick = useMutation(api.orders.adminUpdateMinecraftNick);
   const cancelOrder = useMutation(api.orders.adminCancel);
   const deliverManually = useMutation(api.orders.adminDeliverManually);
   const refreshPayment = useAction(api.payments.refreshPaymentStatus);
@@ -236,6 +237,61 @@ export default function AdminOrders() {
     } finally {
       if (timer) window.clearTimeout(timer);
       setBusy(null);
+    }
+  };
+
+  // Correção do nick do Minecraft (cliente comprou com o nick errado).
+  const [nickEditing, setNickEditing] = useState(false);
+  const [nickDraft, setNickDraft] = useState("");
+  const [nickSaving, setNickSaving] = useState<"save" | "resend" | null>(null);
+
+  const normalizedNick = nickDraft.trim().replace(/\s+/g, " ");
+  const nickIsValid = /^[A-Za-z0-9_ ]{3,16}$/.test(normalizedNick);
+  const nickChanged = normalizedNick !== (detail?.order.minecraftNick ?? "").trim();
+  const revivableCommands =
+    commands?.filter((c) => c.status === "PENDING" || c.status === "FAILED").length ?? 0;
+
+  const submitNick = async (resend: boolean) => {
+    if (!detail) return;
+    if (!nickIsValid) {
+      toast.error("Nick inválido. Use de 3 a 16 caracteres: letras, números, _ e espaço.");
+      return;
+    }
+    if (!nickChanged) {
+      toast.error("O nick novo é igual ao atual.");
+      return;
+    }
+    setNickSaving(resend ? "resend" : "save");
+    try {
+      const res = await updateMinecraftNick({
+        id: detail.order._id as any,
+        minecraftNick: normalizedNick,
+        resend,
+        waitForOnline: waitOnline,
+      });
+      const base = `Nick atualizado: ${res.oldNick || "(vazio)"} → ${res.newNick}`;
+      if (resend) {
+        toast.success(base, {
+          description:
+            res.created > 0
+              ? `${res.created} entrega(s) antiga(s) invalidada(s) e reenfileirada(s) para ${res.newNick}.`
+              : "Nenhuma entrega pendente para reenviar — o nick foi apenas corrigido.",
+        });
+      } else {
+        toast.success(base, {
+          description:
+            res.updatedCommands > 0
+              ? `${res.updatedCommands} entrega(s) pendente(s) agora vão para ${res.newNick}.`
+              : "Nenhuma entrega pendente para atualizar.",
+        });
+      }
+      setNickEditing(false);
+      setNickDraft("");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao salvar o nick";
+      toast.error(msg.split("Uncaught Error:").pop()?.trim() || msg);
+    } finally {
+      setNickSaving(null);
     }
   };
 
@@ -437,6 +493,8 @@ export default function AdminOrders() {
           setSelectedId(null);
           setManualOpen(false);
           setManualNote("");
+          setNickEditing(false);
+          setNickDraft("");
         }}
       >
         <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
@@ -460,7 +518,104 @@ export default function AdminOrders() {
                     <div><p className="text-xs text-muted-foreground">Discord</p><p>{detail.order.discord}</p></div>
                   )}
                   {detail.order.minecraftNick && (
-                    <div><p className="text-xs text-muted-foreground">Minecraft</p><p>{detail.order.minecraftNick}</p></div>
+                    <div className={nickEditing ? "col-span-2" : undefined}>
+                      <p className="text-xs text-muted-foreground">Minecraft</p>
+                      {!nickEditing ? (
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-medium">{detail.order.minecraftNick}</p>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-6 text-muted-foreground hover:text-foreground"
+                            aria-label="Editar nick do Minecraft"
+                            title="Editar nick do Minecraft"
+                            onClick={() => {
+                              setNickDraft(detail.order.minecraftNick ?? "");
+                              setNickEditing(true);
+                            }}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="mt-1 space-y-2 rounded-lg border bg-muted/30 p-3">
+                          <p className="text-xs text-muted-foreground">
+                            Nick atual:{" "}
+                            <span className="font-medium text-foreground">
+                              {detail.order.minecraftNick}
+                            </span>
+                            {normalizedNick && nickChanged && (
+                              <>
+                                {" → "}
+                                <span className="font-medium text-sky-500">{normalizedNick}</span>
+                              </>
+                            )}
+                          </p>
+                          <Input
+                            value={nickDraft}
+                            onChange={(e) => setNickDraft(e.target.value)}
+                            placeholder="Novo nick do Minecraft"
+                            maxLength={16}
+                            autoFocus
+                            disabled={nickSaving !== null}
+                          />
+                          {nickDraft.trim() && !nickIsValid && (
+                            <p className="text-xs text-red-600 dark:text-red-400">
+                              Use de 3 a 16 caracteres: letras, números, _ e espaço.
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={nickSaving !== null}
+                              onClick={() => {
+                                setNickEditing(false);
+                                setNickDraft("");
+                              }}
+                            >
+                              Cancelar
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={nickSaving !== null || !nickIsValid || !nickChanged}
+                              onClick={() => submitNick(false)}
+                            >
+                              {nickSaving === "save" ? (
+                                <Loader2 className="mr-1 size-3.5 animate-spin" />
+                              ) : null}
+                              Salvar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={
+                                nickSaving !== null ||
+                                !nickIsValid ||
+                                !nickChanged ||
+                                revivableCommands === 0
+                              }
+                              onClick={() => submitNick(true)}
+                            >
+                              {nickSaving === "resend" ? (
+                                <Loader2 className="mr-1 size-3.5 animate-spin" />
+                              ) : (
+                                <RefreshCw className="mr-1 size-3.5" />
+                              )}
+                              Salvar e reenviar entrega
+                            </Button>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            Salvar só corrige o destinatário. “Salvar e reenviar” invalida as
+                            tentativas pendentes do nick antigo e cria uma nova entrega para o nick
+                            novo. Entregas já concluídas nunca são reenviadas.{" "}
+                            {revivableCommands === 0
+                              ? "Não há tentativa pendente neste pedido agora."
+                              : ""}
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   )}
                   {detail.order.phone && (
                     <div><p className="text-xs text-muted-foreground">Telefone</p><p>{detail.order.phone}</p></div>

@@ -308,7 +308,7 @@ describe("fila de entregas", () => {
     expect(attempts.some((a) => a.status === "FAILED")).toBe(true);
   });
 
-  test("PENDING (jogador offline) continua disponível", async () => {
+  test("PENDING (jogador offline) espera 2 min antes de voltar à fila", async () => {
     const t = convexTest(schema, modules);
     const cmd = await paidWithQueue(t);
     const { token } = await newKey(t, FULL_SCOPES, { serverId: "survival-01" });
@@ -317,8 +317,17 @@ describe("fila de entregas", () => {
     });
     const stored = (await listCommands(t))[0];
     expect(stored.status).toBe("PENDING");
+    // Voltar com executeAt=agora fazia o addon re-pegar em segundos (loop
+    // infinito quando o jogador estava offline). Agora espera 2 min.
+    expect(stored.executeAt - Date.now()).toBeGreaterThan(60_000);
     const res = await callV1(t, token, "GET", "/api/v1/app/queued_commands");
-    expect(res.body as any[]).toHaveLength(1);
+    expect(res.body as any[]).toHaveLength(0);
+    // Passados os 2 min, volta a ficar disponível sem consumir tentativa.
+    await t.run(async (ctx) => {
+      await ctx.db.patch(stored._id, { executeAt: Date.now() - 1 });
+    });
+    const again = await callV1(t, token, "GET", "/api/v1/app/queued_commands");
+    expect(again.body as any[]).toHaveLength(1);
   });
 
   test("delivery id inexistente → 404", async () => {

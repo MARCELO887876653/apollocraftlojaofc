@@ -15,6 +15,8 @@ import {
 } from "./lib/statsRollups";
 import { scheduleWebhookEvent } from "./lib/webhookDispatch";
 import { moveQueueCount } from "./lib/queueStats";
+import { generateDeliveryId } from "./lib/hash";
+import { DELIVERY_EVENT, logDeliveryEvent } from "./lib/deliveryLog";
 
 // ─── Checkout: criação de pedido (TODOS os valores recalculados no servidor) ───
 
@@ -633,6 +635,215 @@ export const adminUpdateStatus = mutation({
       });
     }
     await logAudit(ctx, admin, "order.status_update", "order", id, { paymentStatus });
+  },
+});
+
+/**
+ * Corrige o nick do Minecraft de um pedido (cliente comprou com o nick errado).
+ *
+ * Atualiza o pedido e TODAS as entregas ainda não concluídas — o addon lê o
+ * destinatário de `deliveryCommands.clientIdentifier` e de `variables.nickname`
+ * no claim, então não basta mudar o texto no painel.
+ *
+ * `resend: true` (botão "Salvar e reenviar entrega") invalida as tentativas
+ * pendentes/falhas do nick antigo e cria comandos novos com o nick corrigido.
+ * Entregas DONE nunca são tocadas nem reenviadas automaticamente: o produto
+ * já saiu e um reenvio seria duplicação.
+ */
+export const adminUpdateMinecraftNick = mutation({
+  args: {
+    id: v.id("orders"),
+    minecraftNick: v.string(),
+    resend: v.optional(v.boolean()),
+    // Reenvio que espera o jogador entrar (offlineExecute=false no comando).
+    waitForOnline: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { id, minecraftNick, resend, waitForOnline }) => {
+    const admin = await requireAdmin(ctx, resend ? "deliveries.manage" : "orders.manage");
+    const order = await ctx.db.get(id);
+    if (!order) throw new ConvexError("Pedido não encontrado");
+
+    const oldNick = (order.minecraftNick ?? "").trim();
+    const newNick = minecraftNick.trim().replace(/\s+/g, " ");
+    // Nick de Minecraft (Java/Bedrock): letras, números, _ e espaço, 3–16.
+    if (!/^[A-Za-z0-9_ ]{3,16}$/.test(newNick)) {
+      throw new ConvexError(
+        "Nick inválido. Use de 3 a 16 caracteres: letras, números, _ e espaço.",
+      );
+    }
+    if (newNick === oldNick) {
+      throw new ConvexError("O nick novo é igual ao atual.");
+    }
+
+    const commands = await ctx.db
+      .query("deliveryCommands")
+      .withIndex("by_order", (q) => q.eq("orderId", id))
+      .collect();
+
+    // Entrega em voo: o addon pode estar executando o comando agora. Alterar
+    // o destinatário no meio do caminho poderia entregar para o nick errado.
+    const inFlight = commands.find((c) => c.status === "PROCESSING");
+    if (inFlight) {
+      throw new ConvexError(
+        "Há uma entrega em processamento para este pedido. Aguarde ela concluir (ou o claim expirar) e tente de novo.",
+      );
+    }
+
+    const now = Date.now();
+    const withNick = (c: any) => {
+      const vars = Array.isArray(c.variables) ? c.variables : [];
+      const hasNick = vars.some((v: any) => v?.name === "nickname");
+      return {
+        clientIdentifier: newNick,
+        variables: hasNick
+          ? vars.map((v: any) => (v?.name === "nickname" ? { name: "nickname", value: newNick } : v))
+          : [...vars, { name: "nickname", value: newNick }],
+      };
+    };
+
+    // 1) Destinatário atualizado em tudo que ainda pode ser executado (ou
+    // revivido pelo painel). Entregas DONE ficam intactas como registro.
+    let updatedCommands = 0;
+    for (const c of commands) {
+      if (c.status === "DONE") continue;
+      await ctx.db.patch(c._id, { ...withNick(c), updatedAt: now });
+      updatedCommands++;
+    }
+
+    // 2) Reenvio: invalida as tentativas do nick antigo e cria comandos novos.
+    //    Só PENDING/FAILED (nada já entregue). Cada comando novo tem id próprio,
+    //    então um claim antigo jamais entrega para o nick errado.
+    let canceled = 0;
+    let created = 0;
+    let resentTo = "";
+    if (resend) {
+      const revivable = commands.filter((c) => c.status === "PENDING" || c.status === "FAILED");
+      for (const c of revivable) {
+        await ctx.db.patch(c._id, {
+          status: "CANCELED",
+          response: "Cancelado",
+          reason: `Nick do Minecraft corrigido (${oldNick || "vazio"} → ${newNick}); esta tentativa não pode mais ser entregue`,
+          completedAt: now,
+          updatedAt: now,
+        });
+        await logDeliveryEvent(ctx, {
+          deliveryId: c._id,
+          publicId: c.publicId,
+          orderId: c.orderId,
+          orderNumber: c.orderNumber,
+          type: DELIVERY_EVENT.canceled,
+          status: "CANCELED",
+          message: `Tentativa invalidada: nick corrigido de ${oldNick || "(vazio)"} para ${newNick}`,
+          actor: "ADMIN",
+          actorName: admin.name,
+          serverId: c.serverId,
+          addonId: c.addonId,
+          details: { fromStatus: c.status, oldNick, newNick },
+        });
+        await moveQueueCount(ctx, c.status, "CANCELED");
+        canceled++;
+
+        const publicId = generateDeliveryId();
+        const newCommandId = await ctx.db.insert("deliveryCommands", {
+          publicId,
+          idempotencyKey: `${c.idempotencyKey}:nick:${now}:${created}`,
+          orderId: c.orderId,
+          orderNumber: c.orderNumber,
+          orderItemIndex: c.orderItemIndex,
+          productId: c.productId,
+          productName: c.productName,
+          serverId: c.serverId,
+          addonId: c.addonId,
+          ...withNick(c),
+          action: c.action,
+          actionId: c.actionId,
+          stepIndex: c.stepIndex,
+          deliveryGroupId: c.deliveryGroupId,
+          deliveryMode: c.deliveryMode,
+          referenceId: c.referenceId,
+          referenceRevision: c.referenceRevision,
+          command: c.command,
+          payload: c.payload,
+          recipeSnapshot: c.recipeSnapshot,
+          offlineExecute: waitForOnline ? false : c.offlineExecute,
+          executeAt: now,
+          status: "PENDING",
+          attempts: 0,
+          maxAttempts: c.maxAttempts,
+          schemaVersion: c.schemaVersion,
+          reverseAction: c.reverseAction,
+          reversePayload: c.reversePayload,
+          reverseDelaySeconds: c.reverseDelaySeconds,
+          resentBy: admin.name ?? "painel",
+          resentAt: now,
+          resendCount: (c.resendCount ?? 0) + 1,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await logDeliveryEvent(ctx, {
+          deliveryId: newCommandId,
+          publicId,
+          orderId: c.orderId,
+          orderNumber: c.orderNumber,
+          type: DELIVERY_EVENT.created,
+          status: "PENDING",
+          message: `Nova tentativa após correção do nick: ${oldNick || "(vazio)"} → ${newNick}${
+            waitForOnline ? " · aguardando o jogador entrar" : ""
+          }`,
+          actor: "ADMIN",
+          actorName: admin.name,
+          serverId: c.serverId,
+          addonId: c.addonId,
+          details: { oldNick, newNick, waitForOnline: Boolean(waitForOnline), previousStatus: c.status },
+        });
+        await moveQueueCount(ctx, undefined, "PENDING");
+        created++;
+        resentTo = newNick;
+      }
+    }
+
+    // 3) Pedido: só o nick (pagamento, itens, valores e número intactos) +
+    //    registro no histórico com quem alterou, de/para e quando.
+    const note = `Nick do Minecraft alterado por ${admin.name}: ${oldNick || "(vazio)"} → ${newNick}${
+      resend ? ` (entrega reenviada${created === 0 ? ": nada pendente" : ""})` : ""
+    }`;
+    await ctx.db.patch(id, {
+      minecraftNick: newNick,
+      statusHistory: [...order.statusHistory, { status: "nick_updated", at: now, note }],
+      ...(created > 0 ? { deliveryStatus: "pending" as const } : {}),
+      updatedAt: now,
+    });
+
+    // Se o cadastro do cliente ainda aponta para o nick antigo, corrige também
+    // — senão o próximo checkout volta a sugerir o nick errado. Só mexe quando
+    // é exatamente o mesmo valor (não sobrescreve um nick mais novo).
+    if (order.customerId && oldNick) {
+      const customer = await ctx.db.get(order.customerId);
+      if (customer && (customer.minecraftNick ?? "").trim() === oldNick) {
+        await ctx.db.patch(customer._id, { minecraftNick: newNick });
+      }
+    }
+
+    // Entregas "manuais" antigas do pedido também apontam para o destinatário.
+    const legacyDeliveries = await ctx.db
+      .query("deliveries")
+      .withIndex("by_order", (q) => q.eq("orderId", id))
+      .collect();
+    for (const d of legacyDeliveries) {
+      if (d.status === "delivered") continue;
+      await ctx.db.patch(d._id, { target: newNick, updatedAt: now });
+    }
+
+    await logAudit(ctx, admin, "order.nick_update", "order", id, {
+      oldNick,
+      newNick,
+      resend: Boolean(resend),
+      updatedCommands,
+      canceled,
+      created,
+    });
+
+    return { ok: true as const, oldNick, newNick, updatedCommands, canceled, created, resentTo };
   },
 });
 

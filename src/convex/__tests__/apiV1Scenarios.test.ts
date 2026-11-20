@@ -256,7 +256,7 @@ describe("jogadores offline", () => {
     expect(body.data.every((c: any) => c.order.client_identifier === "Steve123")).toBe(true);
   });
 
-  test("addon devolve PLAYER_OFFLINE: volta para a fila sem nova tentativa", async () => {
+  test("addon devolve PLAYER_OFFLINE: espera e volta para a fila sem nova tentativa", async () => {
     const t = convexTest(schema, modules);
     await seedDeliveries(t, 1, { offlineExecute: false });
     const { token } = await newAddonKey(t);
@@ -289,7 +289,17 @@ describe("jogadores offline", () => {
     // retorno para a fila devolve a tentativa (volta a 0)
     expect(attemptsAfterClaim).toBe(1);
     expect(after.attempts).toBe(0);
-    // continua disponível para quando o jogador voltar
+    // Não volta na hora: espera 2 min para o addon não entrar em loop de
+    // claim → PLAYER_OFFLINE → claim enquanto o jogador está fora.
+    expect((await claimViaHttp(t, token, 5)).body.count).toBe(0);
+    await t.run(async (ctx) => {
+      const row = await ctx.db
+        .query("deliveryCommands")
+        .withIndex("by_publicId", (q) => q.eq("publicId", cmd.id))
+        .first();
+      await ctx.db.patch(row!._id, { executeAt: Date.now() - 1 });
+    });
+    // Passada a espera, continua disponível para quando o jogador voltar.
     expect((await claimViaHttp(t, token, 5)).body.count).toBe(1);
     await expectCountersConsistent(t);
   });

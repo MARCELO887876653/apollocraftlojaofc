@@ -47,6 +47,7 @@ import type * as lib_deliveryLog from "../lib/deliveryLog.js";
 import type * as lib_deliveryRecipe from "../lib/deliveryRecipe.js";
 import type * as lib_discord from "../lib/discord.js";
 import type * as lib_hash from "../lib/hash.js";
+import type * as lib_orderDeliveryStatus from "../lib/orderDeliveryStatus.js";
 import type * as lib_queueStats from "../lib/queueStats.js";
 import type * as lib_seo from "../lib/seo.js";
 import type * as lib_statsDashboard from "../lib/statsDashboard.js";
@@ -119,6 +120,7 @@ declare const fullApi: ApiFromModules<{
   "lib/deliveryRecipe": typeof lib_deliveryRecipe;
   "lib/discord": typeof lib_discord;
   "lib/hash": typeof lib_hash;
+  "lib/orderDeliveryStatus": typeof lib_orderDeliveryStatus;
   "lib/queueStats": typeof lib_queueStats;
   "lib/seo": typeof lib_seo;
   "lib/statsDashboard": typeof lib_statsDashboard;

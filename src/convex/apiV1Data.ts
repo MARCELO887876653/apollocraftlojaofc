@@ -6,6 +6,7 @@ import { generateClaimToken } from "./lib/hash";
 import { API_SCOPES } from "./lib/apiSchema";
 import { syncChangesCore } from "./apiV1Sync";
 import { listQueuedCore } from "./deliveryCommands";
+import { syncOrderDeliveryStatus } from "./lib/orderDeliveryStatus";
 import { moveQueueCount, readQueueCounts } from "./lib/queueStats";
 import {
   DELIVERY_EVENT,
@@ -44,6 +45,9 @@ export const OFFLINE_REQUEUE_MS = 2 * 60 * 1000;
 
 const ERROR_CODES = {
   PLAYER_OFFLINE: "PLAYER_OFFLINE",
+  // Inventário cheio é uma condição temporária: a entrega não pode consumir
+  // tentativa nem falhar de vez — volta para a fila e tenta de novo.
+  INVENTORY_FULL: "INVENTORY_FULL",
   HANDLER_NOT_FOUND: "HANDLER_NOT_FOUND",
   REFERENCE_NOT_FOUND: "REFERENCE_NOT_FOUND",
   REFERENCE_REVISION_NOT_FOUND: "REFERENCE_REVISION_NOT_FOUND",
@@ -763,6 +767,7 @@ export const internalConfirm = internalMutation({
       });
       await moveQueueCount(ctx, c.status, "DONE");
       await finishOpenAttempt(ctx, c._id, "DONE", finalResponse, reason);
+      await syncOrderDeliveryStatus(ctx, c.orderId);
       await logDeliveryEvent(ctx, {
         deliveryId: c._id,
         publicId: c.publicId,
@@ -773,6 +778,8 @@ export const internalConfirm = internalMutation({
         message: `Concluída pelo addon: ${finalResponse}${
           c.resendCount ? ` · após ${c.resendCount} reenvio(s) pelo painel` : ""
         }`,
+        // Parte do kit, quando existir: deixa explícito qual shulker foi
+        // confirmado individualmente.
         actor: "ADDON",
         actorName: addonId ?? serverId,
         serverId,
@@ -784,6 +791,9 @@ export const internalConfirm = internalMutation({
           attempts: c.attempts,
           maxAttempts: c.maxAttempts,
           resendCount: c.resendCount ?? 0,
+          partIndex: c.partIndex ?? null,
+          partTotal: c.partTotal ?? null,
+          partLabel: c.partLabel ?? null,
         },
       });
       return { ok: true as const, status: "DONE" as const };
@@ -800,6 +810,7 @@ export const internalConfirm = internalMutation({
       });
       await moveQueueCount(ctx, c.status, "CANCELED");
       await finishOpenAttempt(ctx, c._id, "CANCELED", response, reason);
+      await syncOrderDeliveryStatus(ctx, c.orderId);
       await logDeliveryEvent(ctx, {
         deliveryId: c._id,
         publicId: c.publicId,
@@ -818,20 +829,38 @@ export const internalConfirm = internalMutation({
     }
 
     if (status === "PENDING") {
-      // devolve para a fila sem consumir tentativa (ex.: jogador offline)
-      const isOffline = errorCode === ERROR_CODES.PLAYER_OFFLINE || /PLAYER_OFFLINE/i.test(response ?? "");
+      // devolve para a fila sem consumir tentativa (ex.: jogador offline ou
+      // inventário cheio — são condições temporárias do lado do jogador)
+      const isOffline =
+        errorCode === ERROR_CODES.PLAYER_OFFLINE || /PLAYER_OFFLINE/i.test(response ?? "");
+      const isInventoryFull =
+        errorCode === ERROR_CODES.INVENTORY_FULL ||
+        /INVENTORY_FULL|invent[oá]rio cheio/i.test(response ?? "");
+      const isTemporaryPlayerState = isOffline || isInventoryFull;
       // Jogador offline NÃO pode voltar para a fila com `executeAt = agora`:
       // o addon pega de novo em segundos e o ciclo claim → offline → claim
       // virava um loop infinito (3.371 tentativas no pedido #S9MKLLWD).
       // Espera 2 min; quando o jogador entrar, a entrega sai no próximo poll.
-      const retryAt = isOffline ? now + OFFLINE_REQUEUE_MS : now;
+      // Inventário cheio espera 60s (o jogador costuma esvaziar rápido).
+      const retryAt = isOffline
+        ? now + OFFLINE_REQUEUE_MS
+        : isInventoryFull
+          ? now + 60_000
+          : now;
       await ctx.db.patch(c._id, {
         status: "PENDING",
         response: response ?? ERROR_CODES.PLAYER_OFFLINE,
         reason: reason ?? undefined,
-        errorCode: errorCode ?? (isOffline ? ERROR_CODES.PLAYER_OFFLINE : undefined),
-        // offline não consome max_attempts: restaura a tentativa consumida no claim
-        attempts: isOffline ? Math.max(0, c.attempts - 1) : c.attempts,
+        errorCode:
+          errorCode ??
+          (isOffline
+            ? ERROR_CODES.PLAYER_OFFLINE
+            : isInventoryFull
+              ? ERROR_CODES.INVENTORY_FULL
+              : undefined),
+        // offline/inventário cheio não consomem max_attempts: restaura a
+        // tentativa consumida no claim
+        attempts: isTemporaryPlayerState ? Math.max(0, c.attempts - 1) : c.attempts,
         executeAt: retryAt,
         retryable: undefined,
         nextAttemptAt: undefined,
@@ -846,11 +875,13 @@ export const internalConfirm = internalMutation({
         publicId: c.publicId,
         orderId: c.orderId,
         orderNumber: c.orderNumber,
-        type: isOffline ? DELIVERY_EVENT.awaitingPlayer : DELIVERY_EVENT.claimed,
+        type: isTemporaryPlayerState ? DELIVERY_EVENT.awaitingPlayer : DELIVERY_EVENT.claimed,
         status: "PENDING",
         message: isOffline
           ? "Jogador offline — a entrega fica na fila esperando ele entrar (não consome tentativa)"
-          : `Devolvida para a fila pelo addon${response ? `: ${response}` : ""}`,
+          : isInventoryFull
+            ? "Inventário cheio — a entrega volta para a fila e tenta de novo em 60s (não consome tentativa)"
+            : `Devolvida para a fila pelo addon${response ? `: ${response}` : ""}`,
         actor: "ADDON",
         actorName: addonId ?? serverId,
         serverId,
@@ -858,11 +889,23 @@ export const internalConfirm = internalMutation({
         apiKeyId,
         details: {
           playerOffline: isOffline,
-          attempts: isOffline ? Math.max(0, c.attempts - 1) : c.attempts,
-          errorCode: errorCode ?? (isOffline ? ERROR_CODES.PLAYER_OFFLINE : null),
+          inventoryFull: isInventoryFull,
+          attempts: isTemporaryPlayerState ? Math.max(0, c.attempts - 1) : c.attempts,
+          errorCode:
+            errorCode ??
+            (isOffline
+              ? ERROR_CODES.PLAYER_OFFLINE
+              : isInventoryFull
+                ? ERROR_CODES.INVENTORY_FULL
+                : null),
         },
       });
-      return { ok: true as const, status: "PENDING" as const, playerOffline: isOffline };
+      return {
+        ok: true as const,
+        status: "PENDING" as const,
+        playerOffline: isOffline,
+        inventoryFull: isInventoryFull,
+      };
     }
 
     // ── FAILED ──
@@ -889,6 +932,7 @@ export const internalConfirm = internalMutation({
       });
       await moveQueueCount(ctx, c.status, "FAILED");
       await finishOpenAttempt(ctx, c._id, "FAILED", response, reason);
+      await syncOrderDeliveryStatus(ctx, c.orderId);
       await logDeliveryEvent(ctx, {
         deliveryId: c._id,
         publicId: c.publicId,

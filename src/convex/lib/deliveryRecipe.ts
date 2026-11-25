@@ -18,6 +18,18 @@ export type ContentsPreview = {
   amount?: number;
 };
 
+/**
+ * Uma parte física da entrega. Para kits, cada parte é UMA shulker: o addon
+ * entrega e confirma cada shulker separadamente (ver `parts` abaixo).
+ */
+export type RecipePart = {
+  id?: string;
+  label?: string;
+  reference_id?: string;
+  reference_revision?: number;
+  contents_preview?: ContentsPreview[];
+};
+
 export type RecipeAction = {
   /** id estável da ação (para snapshot, retry, auditoria e idempotência por step). */
   id?: string;
@@ -26,6 +38,13 @@ export type RecipeAction = {
   reference_id?: string;
   reference_revision?: number;
   contents_preview?: ContentsPreview[];
+  /**
+   * Composição física do kit (uma entrada por shulker). Quando presente, a
+   * fila cria UM comando por parte e o pedido só é considerado entregue
+   * quando todas forem confirmadas. Sem `parts`, a ação continua sendo uma
+   * entrega única (compatível com produtos antigos).
+   */
+  parts?: RecipePart[];
   quantity_mode?: QuantityMode;
   payload?: any;
   command?: string;
@@ -53,6 +72,7 @@ export const RECIPE_LIMITS = {
   MAX_EXTERNAL_ID: 160,
   MAX_REFERENCE_ID: 160,
   MAX_PREVIEW_ITEMS: 64,
+  MAX_PARTS: 12,
   MAX_PAYLOAD_CHARS: 20_000, // por ação (JSON serializado)
   MAX_COMMAND_CHARS: 512,
 } as const;
@@ -82,6 +102,25 @@ function normalizeQuantityMode(value: any): QuantityMode | undefined {
   if (!s) return undefined;
   if (s === "MULTIPLY" || s === "REPEAT" || s === "IGNORE") return s as QuantityMode;
   return undefined;
+}
+
+function normalizeParts(value: any): RecipePart[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: RecipePart[] = [];
+  for (const raw of value.slice(0, RECIPE_LIMITS.MAX_PARTS)) {
+    if (!raw || typeof raw !== "object") continue;
+    const id = optStr(raw.id);
+    const label = optStr(raw.label ?? raw.name)?.slice(0, 120);
+    const referenceId = optStr(raw.reference_id ?? raw.referenceId)?.slice(
+      0,
+      RECIPE_LIMITS.MAX_REFERENCE_ID,
+    );
+    const referenceRevision = optNum(raw.reference_revision ?? raw.referenceRevision);
+    const contentsPreview = normalizePreview(raw.contents_preview ?? raw.contentsPreview);
+    if (!id && !label && !referenceId && !contentsPreview) continue;
+    out.push({ id, label, reference_id: referenceId, reference_revision: referenceRevision, contents_preview: contentsPreview });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function normalizePreview(value: any): ContentsPreview[] | undefined {
@@ -115,6 +154,7 @@ export function recipeToDeliveryV1(recipe: DeliveryRecipe) {
     referenceId: optStr(a.reference_id)?.slice(0, RECIPE_LIMITS.MAX_REFERENCE_ID),
     referenceRevision: optNum(a.reference_revision),
     contentsPreview: normalizePreview(a.contents_preview),
+    parts: normalizeParts(a.parts),
     quantityMode: normalizeQuantityMode(a.quantity_mode),
     serverId: typeof a.server_id === "string" && a.server_id.trim() ? a.server_id.trim() : undefined,
     addonId: typeof a.addon_id === "string" && a.addon_id.trim() ? a.addon_id.trim() : undefined,
@@ -145,6 +185,21 @@ export function deliveryV1ToRecipe(v1: any): DeliveryRecipe {
     ...(a.referenceId ? { reference_id: a.referenceId } : {}),
     ...(a.referenceRevision !== undefined ? { reference_revision: a.referenceRevision } : {}),
     ...(Array.isArray(a.contentsPreview) ? { contents_preview: a.contentsPreview } : {}),
+    ...(Array.isArray(a.parts) && a.parts.length > 0
+      ? {
+          parts: a.parts.map((p: any, partIndex: number) => ({
+            id: p.id ?? `part-${partIndex + 1}`,
+            ...(p.label ? { label: p.label } : {}),
+            ...(p.referenceId ? { reference_id: p.referenceId } : {}),
+            ...(p.referenceRevision !== undefined
+              ? { reference_revision: p.referenceRevision }
+              : {}),
+            ...(Array.isArray(p.contentsPreview)
+              ? { contents_preview: p.contentsPreview }
+              : {}),
+          })),
+        }
+      : {}),
     ...(a.quantityMode ? { quantity_mode: a.quantityMode as QuantityMode } : {}),
     payload: a.payload ?? {},
     ...(a.command ? { command: a.command } : {}),
@@ -204,6 +259,46 @@ export function normalizeActionForQuantity(
 }
 
 /**
+ * Resolve as partes físicas de uma ação (ou de um comando já criado).
+ *
+ * Produtos antigos não têm `parts`: devolve uma única parte com a referência
+ * da própria ação, preservando exatamente o comportamento anterior.
+ */
+export function resolveActionParts(action: any): Array<{
+  index: number;
+  total: number;
+  id: string;
+  label: string;
+  referenceId?: string;
+  referenceRevision?: number;
+  contentsPreview?: ContentsPreview[];
+}> {
+  const rawParts: any[] = Array.isArray(action?.parts) ? action.parts : [];
+  if (rawParts.length === 0) {
+    return [
+      {
+        index: 0,
+        total: 1,
+        id: action?.actionId ?? "part-1",
+        label: action?.action ?? "Entrega",
+        referenceId: action?.referenceId,
+        referenceRevision: action?.referenceRevision,
+        contentsPreview: action?.contentsPreview,
+      },
+    ];
+  }
+  return rawParts.map((part: any, index: number) => ({
+    index,
+    total: rawParts.length,
+    id: part?.id ?? `part-${index + 1}`,
+    label: part?.label ?? `Parte ${index + 1}`,
+    referenceId: part?.referenceId ?? action?.referenceId,
+    referenceRevision: part?.referenceRevision ?? action?.referenceRevision,
+    contentsPreview: part?.contentsPreview,
+  }));
+}
+
+/**
  * Valida a configuração interna `deliveryV1` (usada pelo produto).
  * Retorna a mensagem de erro, ou null se estiver válida.
  *
@@ -225,6 +320,9 @@ export function deliveryV1ConfigError(deliveryV1: any): string | null {
       !Number.isFinite(Number(a.referenceRevision))
     ) {
       return `A ação '${a.action ?? a.actionId ?? "?"}' tem 'reference_revision' inválida.`;
+    }
+    if (Array.isArray(a.parts) && a.parts.length > RECIPE_LIMITS.MAX_PARTS) {
+      return `A ação '${a.action ?? a.actionId ?? "?"}' tem partes demais (máximo ${RECIPE_LIMITS.MAX_PARTS}).`;
     }
   }
   return null;
@@ -257,6 +355,32 @@ export function validateRecipe(raw: any): DeliveryRecipe {
   for (const a of raw.actions) {
     if (!a || typeof a !== "object" || typeof a.type !== "string" || !a.type.trim()) {
       throw new Error("Cada ação precisa de um campo 'type' (string).");
+    }
+    if (a.parts !== undefined) {
+      if (!Array.isArray(a.parts)) {
+        throw new Error("`parts` deve ser um array.");
+      }
+      if (a.parts.length > RECIPE_LIMITS.MAX_PARTS) {
+        throw new Error(`Cada ação pode ter no máximo ${RECIPE_LIMITS.MAX_PARTS} partes.`);
+      }
+      const partIds = new Set<string>();
+      for (const p of a.parts) {
+        if (!p || typeof p !== "object") throw new Error("Cada parte deve ser um objeto.");
+        const pid = optStr(p.id);
+        if (pid) {
+          if (partIds.has(pid)) throw new Error(`id de parte duplicado: '${pid}'.`);
+          partIds.add(pid);
+        }
+        if (
+          p.reference_revision !== undefined &&
+          optNum(p.reference_revision) === undefined
+        ) {
+          throw new Error("'reference_revision' de uma parte deve ser um número inteiro.");
+        }
+        if (p.contents_preview !== undefined && !Array.isArray(p.contents_preview)) {
+          throw new Error("'contents_preview' de uma parte deve ser um array.");
+        }
+      }
     }
     const id = optStr(a.id);
     if (id) {

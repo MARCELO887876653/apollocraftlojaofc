@@ -17,6 +17,10 @@ export type DeliveryItem = {
   status: string;
   deliveredAt?: number;
   payload?: any;
+  /** Para kits: cada shulker com seu próprio status (entregue/pendente). */
+  parts?: { key: string; label: string; status: string; contents?: string[] }[];
+  deliveredParts?: number;
+  totalParts?: number;
 };
 
 function PayloadBox({ payload }: { payload: any }) {
@@ -101,8 +105,35 @@ export function DeliveriesList({
                   {DELIVERY_TYPE_LABEL[d.type] ?? d.type}
                 </span>
               )}
+              {typeof d.totalParts === "number" && d.totalParts > 1 && (
+                <span className="text-xs text-muted-foreground">
+                  {d.deliveredParts ?? 0}/{d.totalParts} shulkers entregues
+                </span>
+              )}
             </div>
-            {d.status === "delivered" ? (
+            {d.parts && d.parts.length > 0 ? (
+              <div className="mt-2 space-y-1">
+                {d.parts.map((p) => (
+                  <div
+                    key={p.key}
+                    className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-1.5"
+                  >
+                    <Badge
+                      variant="outline"
+                      className={DELIVERY_STATUS_COLOR[p.status] ?? ""}
+                    >
+                      {DELIVERY_STATUS_LABEL[p.status] ?? p.status}
+                    </Badge>
+                    <span className="text-xs font-medium">{p.label}</span>
+                    {p.contents && p.contents.length > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {p.contents.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : d.status === "delivered" ? (
               <PayloadBox payload={d.payload} />
             ) : (
               <p className="mt-1 text-xs text-muted-foreground">

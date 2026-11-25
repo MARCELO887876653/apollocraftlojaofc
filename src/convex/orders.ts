@@ -17,6 +17,7 @@ import { scheduleWebhookEvent } from "./lib/webhookDispatch";
 import { moveQueueCount } from "./lib/queueStats";
 import { generateDeliveryId } from "./lib/hash";
 import { DELIVERY_EVENT, logDeliveryEvent } from "./lib/deliveryLog";
+import { isReversalCommand } from "./lib/orderDeliveryStatus";
 
 // ─── Checkout: criação de pedido (TODOS os valores recalculados no servidor) ───
 
@@ -392,6 +393,130 @@ export const myOrders = query({
   },
 });
 
+/**
+ * "O que você recebeu" — une as entregas legadas (tabela `deliveries`) com a
+ * fila automática real (`deliveryCommands`). Antes só a tabela legada era
+ * exibida: produtos entregues pelo addon (GIVE_KIT/GIVE_ITEM) nunca apareciam
+ * e o cliente não tinha como ver o que já saiu e o que ainda falta.
+ *
+ * Cada shulker é mostrado individualmente com seu próprio status — assim uma
+ * entrega parcial (parte 1 entregue, parte 2 pendente) fica visível.
+ */
+async function buildOrderDeliveries(ctx: any, order: any) {
+  const legacy = await ctx.db
+    .query("deliveries")
+    .withIndex("by_order", (q: any) => q.eq("orderId", order._id))
+    .collect();
+  const visible: any[] = [];
+  for (const d of legacy) {
+    const product = await ctx.db.get(d.productId);
+    if (!(product?.delivery?.showToCustomer ?? true)) continue;
+    visible.push({
+      productName: d.productName,
+      quantity: d.quantity,
+      type: d.type,
+      status: d.status,
+      deliveredAt: d.deliveredAt,
+      payload: d.status === "delivered" ? d.payload : undefined,
+    });
+  }
+
+  if (order.paymentStatus !== "paid") return visible;
+
+  const commands = await ctx.db
+    .query("deliveryCommands")
+    .withIndex("by_order", (q: any) => q.eq("orderId", order._id))
+    .collect();
+  const forward = commands.filter((c: any) => !isReversalCommand(c));
+  if (forward.length === 0) return visible;
+
+  // agrupa por item do pedido (cada item pode ter várias unidades e partes)
+  const byItem = new Map<number, any[]>();
+  for (const c of forward) {
+    const idx = c.orderItemIndex ?? 0;
+    if (!byItem.has(idx)) byItem.set(idx, []);
+    byItem.get(idx)!.push(c);
+  }
+
+  for (const [idx, list] of byItem) {
+    const item = order.items?.[idx];
+    if (!item) continue;
+    const product = await ctx.db.get(item.productId);
+    if (!(product?.delivery?.showToCustomer ?? true)) continue;
+
+    const parts: any[] = [];
+    let delivered = 0;
+    let lastDeliveredAt: number | undefined;
+    let anyProcessing = false;
+    let anyPermanentFailure = false;
+
+    const sorted = [...list].sort((a: any, b: any) => a.createdAt - b.createdAt);
+    for (const c of sorted) {
+      const unitIndex =
+        c.unitIndex ?? Number((String(c.idempotencyKey).match(/:u(\d+)/) ?? [])[1] ?? 1) - 1;
+      const partIndex = c.partIndex ?? 0;
+      const partTotal = c.partTotal ?? 1;
+      const rawLabel = c.partLabel || "Entrega";
+      const label =
+        partTotal > 1
+          ? `${rawLabel} (shulker ${partIndex + 1}/${partTotal})`
+          : rawLabel;
+      const fullLabel = (item.quantity ?? 1) > 1 ? `Unidade ${unitIndex + 1} · ${label}` : label;
+      const contents = Array.isArray(c.payload?.kit_part?.contents)
+        ? c.payload.kit_part.contents
+            .map((x: any) => x?.name || x?.type_id || "")
+            .filter(Boolean)
+        : [];
+
+      const isDone = c.status === "DONE";
+      if (isDone) {
+        delivered++;
+        if (c.completedAt && (!lastDeliveredAt || c.completedAt > lastDeliveredAt)) {
+          lastDeliveredAt = c.completedAt;
+        }
+      }
+      if (c.status === "PROCESSING") anyProcessing = true;
+      if (c.status === "FAILED" && (c.retryable !== true || c.requiresManualIntervention)) {
+        anyPermanentFailure = true;
+      }
+
+      parts.push({
+        key: `${unitIndex}:${partIndex}`,
+        label: fullLabel,
+        status: isDone ? "delivered" : c.status === "FAILED" ? "failed" : "pending",
+        contents,
+      });
+    }
+
+    if (parts.length === 0) continue;
+    const status =
+      delivered === parts.length
+        ? "delivered"
+        : anyPermanentFailure
+          ? "failed"
+          : anyProcessing
+            ? "processing"
+            : "pending";
+
+    visible.push({
+      productName: item.name ?? product?.name ?? "Produto",
+      quantity: item.quantity ?? 1,
+      type: "minecraft",
+      status,
+      deliveredAt: status === "delivered" ? lastDeliveredAt : undefined,
+      // mantém compatibilidade com o componente antigo (linha por parte)
+      payload: parts
+        .filter((p) => p.status === "delivered")
+        .map((p) => (p.contents.length ? `${p.label}: ${p.contents.join(", ")}` : p.label)),
+      parts,
+      deliveredParts: delivered,
+      totalParts: parts.length,
+    });
+  }
+
+  return visible;
+}
+
 /** Entregas (o que o cliente recebeu) de um pedido dele. Só expõe itens
  *  marcados como "mostrar ao cliente" e apenas quando entregues. */
 export const myOrderDeliveries = query({
@@ -406,24 +531,7 @@ export const myOrderDeliveries = query({
       .withIndex("by_number", (q) => q.eq("number", number))
       .first();
     if (!order || order.customerEmail !== user.email) return null;
-    const deliveries = await ctx.db
-      .query("deliveries")
-      .withIndex("by_order", (q) => q.eq("orderId", order._id))
-      .collect();
-    const visible = [];
-    for (const d of deliveries) {
-      const product = await ctx.db.get(d.productId);
-      if (!(product?.delivery?.showToCustomer ?? true)) continue;
-      visible.push({
-        productName: d.productName,
-        quantity: d.quantity,
-        type: d.type,
-        status: d.status,
-        deliveredAt: d.deliveredAt,
-        payload: d.status === "delivered" ? d.payload : undefined,
-      });
-    }
-    return visible;
+    return await buildOrderDeliveries(ctx, order);
   },
 });
 
@@ -440,24 +548,7 @@ export const guestDeliveries = query({
     if (!order) return null;
     if (!(await authorizeOrderView(ctx, order, token))) return null;
     if (order.paymentStatus !== "paid") return [];
-    const deliveries = await ctx.db
-      .query("deliveries")
-      .withIndex("by_order", (q) => q.eq("orderId", order._id))
-      .collect();
-    const visible = [];
-    for (const d of deliveries) {
-      const product = await ctx.db.get(d.productId);
-      if (!(product?.delivery?.showToCustomer ?? true)) continue;
-      visible.push({
-        productName: d.productName,
-        quantity: d.quantity,
-        type: d.type,
-        status: d.status,
-        deliveredAt: d.deliveredAt,
-        payload: d.status === "delivered" ? d.payload : undefined,
-      });
-    }
-    return visible;
+    return await buildOrderDeliveries(ctx, order);
   },
 });
 

@@ -67,6 +67,84 @@ const EMPTY_COUNTS: Record<Filter, number> = {
   ALL: 0, PENDING: 0, PROCESSING: 0, DONE: 0, FAILED: 0, CANCELED: 0, SCHEDULED: 0,
 };
 
+type AuditRow = {
+  orderId: string;
+  number: string;
+  minecraftNick: string;
+  deliveryStatus: string;
+  expected: number;
+  done: number;
+  pending: number;
+  failed: number;
+  canceled: number;
+  computed: string | null;
+  issue: string;
+  kitWithoutParts: boolean;
+  parts: { productName: string; label?: string; status: string }[];
+};
+
+const AUDIT_ISSUE_LABEL: Record<string, string> = {
+  delivered_but_order_pending: "Entregue na fila, pedido aberto",
+  partial: "Entrega parcial",
+  failed: "Falha definitiva",
+};
+
+/** Lista pedidos pagos cuja entrega não bate com o status do pedido. */
+function AuditCard() {
+  const rows = useQuery(api.deliveryCommands.adminAuditDeliveries, {
+    limit: 300,
+  }) as AuditRow[] | undefined;
+  if (rows === undefined) return null;
+  if (rows.length === 0) return null;
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+          <ScrollText className="size-4 text-amber-500" />
+          Auditoria de entregas
+          <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-400">
+            {rows.length} pedido(s) com pendência
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <details className="group">
+          <summary className="cursor-pointer list-none text-sm text-muted-foreground">
+            Ver pedidos afetados
+          </summary>
+          <div className="mt-3 space-y-1.5">
+            {rows.map((r) => (
+              <div key={r.orderId} className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-xs">
+                <span className="font-mono font-semibold">{r.number}</span>
+                <span className="text-muted-foreground">{r.minecraftNick || "—"}</span>
+                <Badge variant="outline" className={r.issue === "failed" ? STATUS_CLASS.FAILED : STATUS_CLASS.PENDING}>
+                  {AUDIT_ISSUE_LABEL[r.issue] ?? r.issue}
+                </Badge>
+                <span className="text-muted-foreground">
+                  {r.done}/{r.expected} comando(s) concluído(s)
+                  {r.pending ? ` · ${r.pending} pendente(s)` : ""}
+                  {r.failed ? ` · ${r.failed} falha(s)` : ""}
+                </span>
+                {r.kitWithoutParts && (
+                  <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-400">
+                    kit sem composição de shulkers
+                  </Badge>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Kits sem <code className="rounded bg-muted px-1">parts</code> não têm como ser recuperados
+            automaticamente (o site não sabe quantas shulkers faltam). Publique o kit com a composição
+            de shulkers e use “Entregar shulkers faltantes” no pedido.
+          </p>
+        </details>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AdminDeliveriesAuto() {
   const servers = useQuery(api.apiV1Data.adminListServers) as ServerInfo[] | undefined;
   const [filter, setFilter] = useState<Filter>("ALL");
@@ -185,6 +263,9 @@ export default function AdminDeliveriesAuto() {
           )}
         </CardContent>
       </Card>
+
+      {/* Auditoria: pedidos pagos com entrega inconsistente. */}
+      <AuditCard />
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">

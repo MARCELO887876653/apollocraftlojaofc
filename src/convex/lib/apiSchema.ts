@@ -86,6 +86,18 @@ export const contentsPreviewV1Validator = v.array(
   }),
 );
 
+/**
+ * Uma parte física da entrega (para kits: uma shulker). Cada parte vira um
+ * comando próprio e é confirmada separadamente pelo addon.
+ */
+export const deliveryActionPartV1Validator = v.object({
+  id: v.optional(v.string()),
+  label: v.optional(v.string()),
+  referenceId: v.optional(v.string()),
+  referenceRevision: v.optional(v.number()),
+  contentsPreview: v.optional(contentsPreviewV1Validator),
+});
+
 /** Uma ação de entrega configurada no produto (livre: action + payload JSON). */
 export const deliveryActionV1Validator = v.object({
   // id estável da ação (permite snapshot, retry, auditoria e idempotência por step)
@@ -98,6 +110,9 @@ export const deliveryActionV1Validator = v.object({
   referenceId: v.optional(v.string()),
   referenceRevision: v.optional(v.number()),
   contentsPreview: v.optional(contentsPreviewV1Validator),
+  // composição física do kit (uma entrada por shulker). Sem isto, a ação é
+  // uma entrega única — comportamento antigo preservado.
+  parts: v.optional(v.array(deliveryActionPartV1Validator)),
   quantityMode: v.optional(quantityModeValidator),
   serverId: v.optional(v.string()),
   addonId: v.optional(v.string()),
@@ -172,6 +187,12 @@ export const apiV1Tables = {
     actionId: v.optional(v.string()),
     stepIndex: v.optional(v.number()),
     deliveryGroupId: v.optional(v.string()),
+    // ── partes físicas (shulkers) do kit: um comando por parte ──
+    unitIndex: v.optional(v.number()),
+    partIndex: v.optional(v.number()),
+    partTotal: v.optional(v.number()),
+    partId: v.optional(v.string()),
+    partLabel: v.optional(v.string()),
     // ── LOCAL_REFERENCE (entrega resolvida pelo addon) ──
     deliveryMode: v.optional(v.string()),
     referenceId: v.optional(v.string()),

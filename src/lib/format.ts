@@ -115,4 +115,5 @@ export const DELIVERY_TYPE_LABEL: Record<string, string> = {
   code: "Código único",
   message: "Mensagem",
   manual: "Manual",
+  minecraft: "Entrega no Minecraft",
 };

@@ -640,6 +640,11 @@ export function start() {
   "reference_revision": 3,
   "contents_preview": [
     { "type_id": "minecraft:diamond_sword", "name": "Espada", "amount": 1 }
+  ],
+  "parts": [
+    { "id": "armaduras", "label": "Armaduras" },
+    { "id": "armas", "label": "Armas" },
+    { "id": "blocos", "label": "Blocos" }
   ]
 }`}</Code>
             <p>
@@ -647,6 +652,19 @@ export function start() {
               reconstrói o item a partir da prévia — quem entrega é o addon, resolvendo{" "}
               <code className="rounded bg-muted px-1">reference_id</code> (e{" "}
               <code className="rounded bg-muted px-1">reference_revision</code>) localmente.
+            </p>
+            <p>
+              <strong>Kits com várias shulkers:</strong> declare <code className="rounded bg-muted px-1">parts</code>{" "}
+              com uma entrada por shulker. O site cria <strong>um comando por unidade × shulker</strong> e cada
+              comando traz <code className="rounded bg-muted px-1">part_index</code>,{" "}
+              <code className="rounded bg-muted px-1">part_total</code>,{" "}
+              <code className="rounded bg-muted px-1">part_id</code>,{" "}
+              <code className="rounded bg-muted px-1">part_label</code> e{" "}
+              <code className="rounded bg-muted px-1">payload.kit_part</code> (também refletidos em{" "}
+              <code className="rounded bg-muted px-1">step_index</code>). Entregue <strong>somente aquela shulker</strong>{" "}
+              e confirme aquele comando com <code className="rounded bg-muted px-1">claim_token</code>. O pedido só é
+              marcado como entregue quando todas as partes de todas as unidades estiverem DONE. Sem{" "}
+              <code className="rounded bg-muted px-1">parts</code>, a ação continua sendo uma entrega única.
             </p>
             <p>
               <strong>Revision:</strong> quando o admin altera o kit local, ele incrementa a revisão e o

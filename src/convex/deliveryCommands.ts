@@ -4,7 +4,15 @@ import { v } from "convex/values";
 import { requireAdmin, logAudit } from "./lib/admin";
 import { computeQueueCountsReal, moveQueueCount, readQueueCounts } from "./lib/queueStats";
 import { generateDeliveryId } from "./lib/hash";
-import { deliveryV1ToRecipe, normalizeActionForQuantity } from "./lib/deliveryRecipe";
+import {
+  deliveryV1ToRecipe,
+  normalizeActionForQuantity,
+  resolveActionParts,
+} from "./lib/deliveryRecipe";
+import {
+  computeOrderDeliveryState,
+  syncOrderDeliveryStatus as syncOrderStatus,
+} from "./lib/orderDeliveryStatus";
 import { DELIVERY_EVENT, logDeliveryEvent, resendInfo, deliveryConsoleLine } from "./lib/deliveryLog";
 
 // Versão do schema do documento de entrega (permite evoluir sem quebrar
@@ -40,6 +48,13 @@ function toApiShape(doc: any) {
     mode: doc.deliveryMode ?? "SERVER",
     reference_id: doc.referenceId ?? null,
     reference_revision: doc.referenceRevision ?? null,
+    // parte física (shulker) do kit: o addon entrega apenas esta parte e
+    // confirma este comando individualmente.
+    unit_index: doc.unitIndex ?? null,
+    part_index: doc.partIndex ?? null,
+    part_total: doc.partTotal ?? null,
+    part_id: doc.partId ?? null,
+    part_label: doc.partLabel ?? null,
     command: doc.command ?? null,
     payload: doc.payload ?? {},
     offline_execute: doc.offlineExecute,
@@ -80,6 +95,11 @@ function toAdminShape(doc: any) {
     deliveryMode: doc.deliveryMode ?? "SERVER",
     referenceId: doc.referenceId ?? "",
     referenceRevision: doc.referenceRevision ?? null,
+    unitIndex: doc.unitIndex ?? null,
+    partIndex: doc.partIndex ?? null,
+    partTotal: doc.partTotal ?? null,
+    partId: doc.partId ?? "",
+    partLabel: doc.partLabel ?? "",
     command: doc.command ?? "",
     payload: doc.payload ?? null,
     offlineExecute: doc.offlineExecute,
@@ -229,87 +249,150 @@ export const internalCreateForOrder = internalMutation({
           { name: "pedido", value: order.number },
         ];
 
-        // Um comando por unidade comprada: o addon entrega uma unidade por
-        // comando. Antes a quantidade ia só na variável `quantidade` e quem
-        // comprava 2 kits recebia 1 — o segundo nunca era enfileirado.
+        // Composição física da ação: para kits, uma entrada por shulker.
+        // Sem `parts` (produtos antigos) é uma parte única — igual a antes.
+        const parts = resolveActionParts(action);
+        const usesParts =
+          parts.length > 1 || (Array.isArray(action.parts) && action.parts.length > 0);
+
+        // Chave idempotente estável:
+        //   unidade 1/parte 1 → orderId:item:action (chave antiga)
+        //   unidade 2/parte 1 → …:u2       (chave antiga)
+        //   unidade 1/parte 2 → …:p2
+        //   unidade 2/parte 3 → …:u2:p3
+        const keyForPart = (unit: number, part: number) => {
+          let key = idempotencyKey;
+          if (unit > 0) key += `:u${unit + 1}`;
+          if (part > 0) key += `:p${part + 1}`;
+          return key;
+        };
+
+        // Um comando por unidade comprada × shulker. O addon entrega UMA parte
+        // por comando e confirma cada uma separadamente; o pedido só fecha
+        // quando todas as partes de todas as unidades estiverem DONE.
+        // Antes: um comando por unidade fazia quem comprava um kit de 3
+        // shulkers receber só a primeira (as demais nunca eram enfileiradas).
         for (let unit = 0; unit < units; unit++) {
-          // Primeira unidade mantém a chave antiga (pedidos já processados
-          // não duplicam); as seguintes ganham sufixo próprio.
-          const unitKey = unit === 0 ? idempotencyKey : `${idempotencyKey}:u${unit + 1}`;
-          if (unit > 0) {
+          const unitBaseKey =
+            unit === 0 ? idempotencyKey : `${idempotencyKey}:u${unit + 1}`;
+
+          for (const part of parts) {
+            const unitKey = keyForPart(unit, part.index);
             const already = await ctx.db
               .query("deliveryCommands")
               .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", unitKey))
               .first();
             if (already) continue;
+
+            const partPayload = usesParts
+              ? {
+                  ...(normalizedPayload && typeof normalizedPayload === "object"
+                    ? normalizedPayload
+                    : {}),
+                  kit_part: {
+                    index: part.index,
+                    total: part.total,
+                    id: part.id,
+                    label: part.label,
+                    contents: part.contentsPreview ?? [],
+                  },
+                }
+              : normalizedPayload;
+            const partVariables = usesParts
+              ? [
+                  ...variables,
+                  { name: "parte", value: `${part.index + 1}/${part.total}` },
+                  { name: "parte_id", value: part.id },
+                  { name: "parte_nome", value: part.label },
+                ]
+              : variables;
+
+            const commandPublicId = generateDeliveryId();
+            const commandId = await ctx.db.insert("deliveryCommands", {
+              publicId: commandPublicId,
+              idempotencyKey: unitKey,
+              orderId,
+              orderNumber: order.number,
+              orderItemIndex: i,
+              productId: product._id,
+              productName: product.name,
+              serverId,
+              addonId,
+              clientIdentifier,
+              action: action.action,
+              actionId: action.actionId ?? `a${j}`,
+              // Com várias partes, o step é a própria shulker (compatível com
+              // addons que sempre trataram `step_index` como índice da shulker).
+              stepIndex: usesParts && parts.length > 1 ? part.index : j,
+              deliveryGroupId: `${orderId}:${i}`,
+              deliveryMode: action.mode ?? "SERVER",
+              referenceId: part.referenceId ?? action.referenceId ?? undefined,
+              referenceRevision: part.referenceRevision ?? action.referenceRevision ?? undefined,
+              command: action.command?.trim() || undefined,
+              payload: partPayload ?? undefined,
+              recipeSnapshot,
+              variables: partVariables,
+              offlineExecute: action.offlineExecute ?? true,
+              executeAt: executeAt + part.index * 1000,
+              status: "PENDING",
+              attempts: 0,
+              maxAttempts: 5,
+              schemaVersion: DELIVERY_SCHEMA_VERSION,
+              ...(usesParts
+                ? {
+                    unitIndex: unit,
+                    partIndex: part.index,
+                    partTotal: part.total,
+                    partId: part.id,
+                    partLabel: part.label,
+                  }
+                : {}),
+              reverseAction: action.reverseAction?.trim() || undefined,
+              reversePayload: action.reversePayload ?? undefined,
+              reverseDelaySeconds: action.reverseDelaySeconds ?? undefined,
+              createdAt: now,
+              updatedAt: now,
+            });
+            await logDeliveryEvent(ctx, {
+              deliveryId: commandId,
+              publicId: commandPublicId,
+              orderId,
+              orderNumber: order.number,
+              type: DELIVERY_EVENT.created,
+              status: "PENDING",
+              message: `Fila criada: ${action.action}${
+                action.mode === "LOCAL_REFERENCE" && (part.referenceId ?? action.referenceId)
+                  ? ` (local: ${part.referenceId ?? action.referenceId})`
+                  : ""
+              } · unidade ${unit + 1}/${units}${
+                usesParts ? ` · shulker ${part.index + 1}/${part.total} (${part.label})` : ""
+              }`,
+              actor: "SYSTEM",
+              serverId,
+              addonId,
+              details: {
+                mode: action.mode ?? "SERVER",
+                referenceId: part.referenceId ?? action.referenceId ?? null,
+                command: action.command?.trim() || null,
+                quantity: qty,
+                unit: unit + 1,
+                units,
+                partIndex: usesParts ? part.index : null,
+                partTotal: usesParts ? part.total : null,
+                partLabel: usesParts ? part.label : null,
+                offlineExecute: action.offlineExecute ?? true,
+                actionId: action.actionId ?? `a${j}`,
+                stepIndex: j,
+              },
+            });
+            await moveQueueCount(ctx, undefined, "PENDING");
+            created++;
           }
 
-          const commandPublicId = generateDeliveryId();
-          const commandId = await ctx.db.insert("deliveryCommands", {
-            publicId: commandPublicId,
-            idempotencyKey: unitKey,
-            orderId,
-            orderNumber: order.number,
-            orderItemIndex: i,
-            productId: product._id,
-            productName: product.name,
-            serverId,
-            addonId,
-            clientIdentifier,
-            action: action.action,
-            actionId: action.actionId ?? `a${j}`,
-            stepIndex: j,
-            deliveryGroupId: `${orderId}:${i}`,
-            deliveryMode: action.mode ?? "SERVER",
-            referenceId: action.referenceId ?? undefined,
-            referenceRevision: action.referenceRevision ?? undefined,
-            command: action.command?.trim() || undefined,
-            payload: normalizedPayload ?? undefined,
-            recipeSnapshot,
-            variables,
-            offlineExecute: action.offlineExecute ?? true,
-            executeAt,
-            status: "PENDING",
-            attempts: 0,
-            maxAttempts: 5,
-            schemaVersion: DELIVERY_SCHEMA_VERSION,
-            reverseAction: action.reverseAction?.trim() || undefined,
-            reversePayload: action.reversePayload ?? undefined,
-            reverseDelaySeconds: action.reverseDelaySeconds ?? undefined,
-            createdAt: now,
-            updatedAt: now,
-          });
-          await logDeliveryEvent(ctx, {
-            deliveryId: commandId,
-            publicId: commandPublicId,
-            orderId,
-            orderNumber: order.number,
-            type: DELIVERY_EVENT.created,
-            status: "PENDING",
-            message: `Fila criada: ${action.action}${
-              action.mode === "LOCAL_REFERENCE" && action.referenceId ? ` (local: ${action.referenceId})` : ""
-            } · unidade ${unit + 1}/${units}`,
-            actor: "SYSTEM",
-            serverId,
-            addonId,
-            details: {
-              mode: action.mode ?? "SERVER",
-              referenceId: action.referenceId ?? null,
-              command: action.command?.trim() || null,
-              quantity: qty,
-              unit: unit + 1,
-              units,
-              offlineExecute: action.offlineExecute ?? true,
-              actionId: action.actionId ?? `a${j}`,
-              stepIndex: j,
-            },
-          });
-          await moveQueueCount(ctx, undefined, "PENDING");
-          created++;
-
-          // Agendamento de reversão (ex.: VIP 30 dias → REMOVE_RANK depois)
+          // Agendamento de reversão (ex.: VIP 30 dias → REMOVE_RANK depois) —
+          // uma vez por unidade, independente do número de shulkers.
           if (action.reverseAction) {
-            const reverseKey = `${unitKey}:reverse`;
+            const reverseKey = `${unitBaseKey}:reverse`;
             const reverseExisting = await ctx.db
               .query("deliveryCommands")
               .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", reverseKey))
@@ -840,5 +923,285 @@ export const adminCancel = mutation({
     });
     await moveQueueCount(ctx, c.status, "CANCELED");
     await logAudit(ctx, admin, "delivery_v1.cancel", "deliveryCommands", id, { publicId: c.publicId });
+  },
+});
+
+// ─────────────────────────────────────────────────────────────
+// Auditoria de entregas e recuperação de partes faltantes
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Varre os pedidos pagos mais recentes e lista os que têm entrega
+ * inconsistente: parcial, falha definitiva, ou fila toda DONE com o pedido
+ * ainda "pendente" (bug que deixava pedidos entregues abertos).
+ *
+ * `kitWithoutParts` marca kits publicados sem a composição de shulkers — é
+ * exatamente o caso em que o addon entregava só a primeira shulker e o site
+ * não tinha como saber quantas faltavam.
+ */
+async function auditDeliveriesCore(ctx: any, limit?: number) {
+  const max = Math.min(Math.max(1, Math.floor(limit ?? 300)), 1000);
+  const orders = await ctx.db
+    .query("orders")
+    .withIndex("by_paymentStatus_createdAt", (q: any) => q.eq("paymentStatus", "paid"))
+    .order("desc")
+    .take(max);
+
+  const issues: any[] = [];
+  for (const order of orders) {
+    const commands: any[] = await ctx.db
+      .query("deliveryCommands")
+      .withIndex("by_order", (q: any) => q.eq("orderId", order._id))
+      .collect();
+    const legacy: any[] = await ctx.db
+      .query("deliveries")
+      .withIndex("by_order", (q: any) => q.eq("orderId", order._id))
+      .collect();
+    const allForward = commands.filter((c) => !/:(reverse|refund)$/.test(c.idempotencyKey));
+    // Reenvio/correção de nick cancela a tentativa antiga e cria outra para a
+    // MESMA unidade. Cancelado não conta como pendência quando existe uma
+    // tentativa nova naquele item/ação/unidade.
+    const unitOf = (c: any) =>
+      c.unitIndex ??
+      Number((String(c.idempotencyKey).match(/:u(\d+)/) ?? [])[1] ?? 1) - 1;
+    const groupKeyOf = (c: any) =>
+      `${c.orderItemIndex ?? 0}:${c.actionId ?? c.action}:${unitOf(c)}:${c.partIndex ?? 0}`;
+    const forwardedUnits = new Set(
+      allForward.filter((c) => c.status !== "CANCELED").map(groupKeyOf),
+    );
+    const forward = allForward.filter(
+      (c) => c.status !== "CANCELED" || !forwardedUnits.has(groupKeyOf(c)),
+    );
+    if (forward.length === 0 && legacy.length === 0) continue;
+
+    const done = forward.filter((c) => c.status === "DONE").length;
+    const failed = forward.filter((c) => c.status === "FAILED").length;
+    const pending = forward.filter((c) => c.status === "PENDING").length;
+    const canceled = allForward.filter((c) => c.status === "CANCELED").length;
+    const state = computeOrderDeliveryState(commands, legacy);
+    const allDone = forward.every((c) => c.status === "DONE");
+    const kitWithoutParts = forward.some(
+      (c) => c.action === "GIVE_KIT" && c.partTotal == null,
+    );
+
+    let issue: string | null = null;
+    if (state === "delivered" && order.deliveryStatus !== "delivered") {
+      issue = "delivered_but_order_pending";
+    } else if (
+      done > 0 &&
+      forward.some((c) => c.status === "PENDING" || c.status === "PROCESSING" || c.status === "FAILED")
+    ) {
+      issue = "partial";
+    } else if (state === "failed") {
+      issue = "failed";
+    }
+    if (!issue) continue;
+
+    issues.push({
+      orderId: order._id,
+      number: order.number,
+      minecraftNick: order.minecraftNick ?? "",
+      customerEmail: order.customerEmail,
+      deliveryStatus: order.deliveryStatus,
+      paidAt: order.paidAt ?? order.createdAt,
+      totalCents: order.totalCents,
+      expected: forward.length,
+      done,
+      pending,
+      failed,
+      canceled,
+      computed: state,
+      issue,
+      kitWithoutParts,
+      parts: forward.map((c) => ({
+        productName: c.productName,
+        action: c.action,
+        partIndex: c.partIndex ?? null,
+        partTotal: c.partTotal ?? null,
+        partLabel: c.partLabel ?? "",
+        status: c.status,
+      })),
+    });
+  }
+  return issues;
+}
+
+/** Recalcula o status de entrega de UM pedido (operações/recuperação). */
+export const internalSyncOrderDeliveryStatus = internalMutation({
+  args: { orderId: v.id("orders") },
+  handler: async (ctx, { orderId }) => ({
+    status: await syncOrderStatus(ctx, orderId),
+  }),
+});
+
+export const internalAuditDeliveries = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, { limit }) => auditDeliveriesCore(ctx, limit),
+});
+
+export const adminAuditDeliveries = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, { limit }) => {
+    await requireAdmin(ctx, "deliveries.view");
+    return await auditDeliveriesCore(ctx, limit);
+  },
+});
+
+/**
+ * Recria SOMENTE as partes (shulkers) que declaradamente faltam no pedido.
+ *
+ * Só age em ações com `parts` configuradas no produto: sem a composição de
+ * shulkers não é possível saber o que falta, e inventar comandos poderia dar
+ * itens duplicados. A chave idempotente de cada parte impede recriação.
+ *
+ * Uso: publicar o kit com `parts` (uma por shulker) e rodar isto no pedido.
+ */
+export const adminRecoverMissingParts = mutation({
+  args: { orderId: v.id("orders"), confirm: v.boolean() },
+  handler: async (ctx, { orderId, confirm }) => {
+    const admin = await requireAdmin(ctx, "deliveries.manage");
+    if (!confirm) {
+      throw new Error("Confirmação obrigatória para recuperar partes faltantes.");
+    }
+    const order: any = await ctx.db.get(orderId);
+    if (!order) throw new Error("Pedido não encontrado");
+
+    const existing: any[] = await ctx.db
+      .query("deliveryCommands")
+      .withIndex("by_order", (q) => q.eq("orderId", orderId))
+      .collect();
+    const existingKeys = new Set(existing.map((c) => c.idempotencyKey));
+    const now = Date.now();
+    let created = 0;
+    const createdParts: any[] = [];
+
+    for (let i = 0; i < order.items.length; i++) {
+      const item = order.items[i];
+      const product: any = await ctx.db.get(item.productId);
+      const cfg = product?.deliveryV1;
+      if (!cfg?.enabled || !Array.isArray(cfg.actions)) continue;
+      const recipeSnapshot = deliveryV1ToRecipe(cfg);
+      const qty = Math.max(1, Math.trunc(item.quantity ?? 1));
+
+      for (let j = 0; j < cfg.actions.length; j++) {
+        const action = cfg.actions[j];
+        if (!action?.action) continue;
+        const parts = resolveActionParts(action);
+        if (parts.length <= 1) continue; // sem composição de shulkers
+
+        const base = `${orderId}:${i}:${j}`;
+        for (let unit = 0; unit < qty; unit++) {
+          for (const part of parts) {
+            let key = base;
+            if (unit > 0) key += `:u${unit + 1}`;
+            if (part.index > 0) key += `:p${part.index + 1}`;
+            if (existingKeys.has(key)) continue;
+
+            const publicId = generateDeliveryId();
+            const commandId = await ctx.db.insert("deliveryCommands", {
+              publicId,
+              idempotencyKey: key,
+              orderId,
+              orderNumber: order.number,
+              orderItemIndex: i,
+              productId: product._id,
+              productName: product.name,
+              serverId: action.serverId?.trim() || "GLOBAL",
+              addonId: action.addonId?.trim() || "custom",
+              clientIdentifier:
+                order.minecraftNick ?? order.uuidField ?? order.discord ?? order.customerEmail,
+              action: action.action,
+              actionId: action.actionId ?? `a${j}`,
+              stepIndex: part.index,
+              deliveryGroupId: `${orderId}:${i}`,
+              deliveryMode: action.mode ?? "SERVER",
+              referenceId: part.referenceId ?? action.referenceId ?? undefined,
+              referenceRevision: part.referenceRevision ?? action.referenceRevision ?? undefined,
+              command: action.command?.trim() || undefined,
+              payload: {
+                ...(action.payload && typeof action.payload === "object" ? action.payload : {}),
+                kit_part: {
+                  index: part.index,
+                  total: part.total,
+                  id: part.id,
+                  label: part.label,
+                  contents: part.contentsPreview ?? [],
+                },
+              },
+              recipeSnapshot,
+              variables: [
+                { name: "nickname", value: order.minecraftNick ?? "" },
+                { name: "produto", value: item.name ?? product.name },
+                { name: "produto_id", value: String(product._id) },
+                { name: "quantidade", value: String(qty) },
+                { name: "pedido", value: order.number },
+                { name: "parte", value: `${part.index + 1}/${part.total}` },
+                { name: "parte_id", value: part.id },
+                { name: "parte_nome", value: part.label },
+              ],
+              offlineExecute: action.offlineExecute ?? true,
+              executeAt: now,
+              status: "PENDING",
+              attempts: 0,
+              maxAttempts: 5,
+              schemaVersion: DELIVERY_SCHEMA_VERSION,
+              unitIndex: unit,
+              partIndex: part.index,
+              partTotal: part.total,
+              partId: part.id,
+              partLabel: part.label,
+              resentBy: admin.name ?? "painel",
+              resentAt: now,
+              createdAt: now,
+              updatedAt: now,
+            });
+            await logDeliveryEvent(ctx, {
+              deliveryId: commandId,
+              publicId,
+              orderId,
+              orderNumber: order.number,
+              type: DELIVERY_EVENT.created,
+              status: "PENDING",
+              message: `Parte faltante enfileirada: ${action.action} · unidade ${unit + 1}/${qty} · shulker ${part.index + 1}/${part.total} (${part.label})`,
+              actor: "ADMIN",
+              actorName: admin.name,
+              serverId: action.serverId?.trim() || "GLOBAL",
+              addonId: action.addonId?.trim() || "custom",
+              details: { partIndex: part.index, partTotal: part.total, partLabel: part.label, unit: unit + 1 },
+            });
+            await moveQueueCount(ctx, undefined, "PENDING");
+            existingKeys.add(key);
+            created++;
+            createdParts.push({
+              productName: product.name,
+              unit: unit + 1,
+              part: part.index + 1,
+              total: part.total,
+              label: part.label,
+            });
+          }
+        }
+      }
+    }
+
+    if (created > 0) {
+      await ctx.db.patch(orderId, {
+        deliveryStatus: "pending",
+        updatedAt: now,
+        statusHistory: [
+          ...order.statusHistory,
+          {
+            status: "pending",
+            at: now,
+            note: `Recuperação de partes faltantes por ${admin.name}: ${created} comando(s) enfileirado(s)`,
+          },
+        ],
+      });
+    }
+    await logAudit(ctx, admin, "order.recover_missing_parts", "order", orderId, {
+      created,
+      parts: createdParts,
+    });
+    return { created, parts: createdParts };
   },
 });

@@ -54,6 +54,12 @@ type Command = {
   resendCount?: number;
   resentBy?: string;
   resentAt?: number | null;
+  orderItemIndex?: number;
+  unitIndex?: number | null;
+  partIndex?: number | null;
+  partTotal?: number | null;
+  partId?: string;
+  partLabel?: string;
 };
 
 // Linha do log completo de uma entrega (deliveryEvents).
@@ -149,6 +155,7 @@ export default function AdminOrders() {
   const deliverManually = useMutation(api.orders.adminDeliverManually);
   const refreshPayment = useAction(api.payments.refreshPaymentStatus);
   const redeliverCommand = useMutation(api.deliveryCommands.adminRedeliver);
+  const recoverMissingParts = useMutation(api.deliveryCommands.adminRecoverMissingParts);
   // Entregas automáticas (Minecraft) do pedido aberto — é o que o addon
   // consome; ficava invisível no detalhe do pedido.
   const commands = useQuery(
@@ -298,6 +305,38 @@ export default function AdminOrders() {
   // Reenvio: o botão existe SEMPRE, em qualquer status da entrega (concluída,
   // falhou, cancelada). Devolve a comando para a fila do addon como nova.
   const [redeliveringId, setRedeliveringId] = useState<string | null>(null);
+  const [recoveringParts, setRecoveringParts] = useState(false);
+
+  /** Recria apenas os shulkers que faltam (produtos com `parts`). */
+  const recoverParts = async (orderId: string) => {
+    if (
+      !confirm(
+        "Enfileirar somente as shulkers faltantes deste pedido? O addon precisa suportar entrega por parte (part_index) para não repetir a shulker já recebida.",
+      )
+    ) {
+      return;
+    }
+    setRecoveringParts(true);
+    try {
+      const res = await recoverMissingParts({ orderId: orderId as any, confirm: true });
+      toast.success(
+        res.created > 0
+          ? `${res.created} shulker(s) faltante(s) enfileirada(s)`
+          : "Nenhuma parte faltante — o produto não declara shulkers ou já está completo.",
+        {
+          description:
+            res.created > 0
+              ? res.parts.map((p: any) => `Unidade ${p.unit} · ${p.part}/${p.total} (${p.label})`).join(" · ")
+              : "Para recuperar, publique o kit com a composição de shulkers (parts).",
+        },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao recuperar partes";
+      toast.error(msg.split("Uncaught Error:").pop()?.trim() || msg);
+    } finally {
+      setRecoveringParts(false);
+    }
+  };
   const [openLogId, setOpenLogId] = useState<string | null>(null);
   // Reenviar esperando o jogador entrar (offlineExecute=false no comando).
   const [waitOnline, setWaitOnline] = useState(false);
@@ -844,6 +883,16 @@ export default function AdminOrders() {
                               {c.productName} → {c.clientIdentifier} · {c.serverId}/{c.addonId} ·{" "}
                               {c.attempts}/{c.maxAttempts} tentativas
                             </p>
+                            {c.partTotal != null && (
+                              <p className="mt-0.5 text-amber-600 dark:text-amber-400">
+                                shulker {(c.partIndex ?? 0) + 1}/{c.partTotal}
+                                {c.partLabel ? ` · ${c.partLabel}` : ""}
+                                {c.unitIndex != null &&
+                                (detail.order.items[c.orderItemIndex ?? 0]?.quantity ?? 1) > 1
+                                  ? ` · unidade ${c.unitIndex + 1}`
+                                  : ""}
+                              </p>
+                            )}
                             {Boolean(c.resendCount) && (
                               <p className="mt-0.5 text-sky-500">
                                 reenviada {c.resendCount}×{" "}
@@ -949,6 +998,22 @@ export default function AdminOrders() {
                         />
                         Ao reenviar, esperar o jogador entrar (não entregar com ele offline)
                       </label>
+                      {detail.order.deliveryStatus !== "delivered" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          disabled={recoveringParts}
+                          onClick={() => recoverParts(detail.order._id)}
+                        >
+                          {recoveringParts ? (
+                            <Loader2 className="mr-1 size-3 animate-spin" />
+                          ) : (
+                            <PackagePlus className="mr-1 size-3" />
+                          )}
+                          Entregar shulkers faltantes
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>

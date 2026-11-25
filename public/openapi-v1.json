@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Apollo Craft — API v1",
-    "version": "1.0.0",
-    "description": "API própria de entregas automáticas e catálogo bidirecional para addons Minecraft Bedrock. Autenticação por `Authorization: Bearer sk_live_...` ou `X-Api-Key` (BDS). Erros no formato { errors: [{ message, code }] }."
+    "version": "1.1.0",
+    "description": "API própria de entregas automáticas e catálogo bidirecional para addons Minecraft Bedrock. Entrega por unidade × shulker (parts/part_index), confirmação individual e retry para offline/inventário cheio. Autenticação por `Authorization: Bearer sk_live_...` ou `X-Api-Key` (BDS). Erros no formato { errors: [{ message, code }] }."
   },
   "servers": [{ "url": "https://capable-akita-865.convex.site/api/v1", "description": "HTTP actions do Convex (backend de produção da loja)" }],
   "security": [{ "bearerAuth": [] }, { "apiKeyAuth": [] }],
@@ -42,6 +42,17 @@
           "required": ["type_id"]
         }
       },
+      "DeliveryPart": {
+        "type": "object",
+        "description": "Uma parte física do kit: uma shulker. O site cria um comando por unidade × parte e o addon confirma cada uma.",
+        "properties": {
+          "id": { "type": "string", "description": "id estável da parte" },
+          "label": { "type": "string" },
+          "reference_id": { "type": "string", "description": "Referência local específica da parte (herda a da ação se omitida)." },
+          "reference_revision": { "type": "integer" },
+          "contents_preview": { "$ref": "#/components/schemas/ContentsPreview" }
+        }
+      },
       "DeliveryAction": {
         "type": "object",
         "properties": {
@@ -51,6 +62,12 @@
           "reference_id": { "type": "string", "description": "Kit/item mantido no addon." },
           "reference_revision": { "type": "integer" },
           "contents_preview": { "$ref": "#/components/schemas/ContentsPreview" },
+          "parts": {
+            "type": "array",
+            "description": "Uma entrada por shulker. Sem parts, a ação é uma entrega única (compatível com pedidos antigos).",
+            "maxItems": 12,
+            "items": { "$ref": "#/components/schemas/DeliveryPart" }
+          },
           "quantity_mode": { "type": "string", "enum": ["MULTIPLY", "REPEAT", "IGNORE"] },
           "payload": {},
           "command": { "type": "string" },
@@ -124,18 +141,33 @@
           "action": { "type": "string" },
           "action_id": { "type": ["string", "null"] },
           "step_index": { "type": ["integer", "null"] },
+          "delivery_group_id": { "type": ["string", "null"] },
           "mode": { "type": "string" },
           "reference_id": { "type": ["string", "null"] },
           "reference_revision": { "type": ["integer", "null"] },
+          "unit_index": { "type": ["integer", "null"], "description": "Unidade comprada (0 = primeira)." },
+          "part_index": { "type": ["integer", "null"], "description": "Índice da shulker (0 = primeira)." },
+          "part_total": { "type": ["integer", "null"], "description": "Total de shulkers da ação." },
+          "part_id": { "type": ["string", "null"] },
+          "part_label": { "type": ["string", "null"] },
           "payload": {},
+          "offline_execute": { "type": "boolean" },
+          "execute_at": { "type": "string", "format": "date-time" },
           "status": { "type": "string", "enum": ["PENDING", "PROCESSING", "DONE", "FAILED", "CANCELED"] },
           "attempts": { "type": "integer" },
+          "max_attempts": { "type": "integer" },
+          "error_code": { "type": ["string", "null"] },
+          "retryable": { "type": ["boolean", "null"] },
+          "next_attempt_at": { "type": ["string", "null"] },
+          "requires_manual_intervention": { "type": "boolean" },
           "claim_token": { "type": "string" },
+          "claim_expires_at": { "type": "string" },
           "order": {
             "type": "object",
             "properties": {
               "id": { "type": "string" },
-              "client_identifier": { "type": "string" }
+              "client_identifier": { "type": "string" },
+              "variables": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "value": { "type": "string" } } } }
             }
           }
         }
@@ -192,7 +224,9 @@
           "claim_token": { "type": "string" },
           "response": { "type": "string" },
           "reason": { "type": "string" },
-          "error_code": { "type": "string", "enum": ["PLAYER_OFFLINE", "HANDLER_NOT_FOUND", "REFERENCE_NOT_FOUND", "REFERENCE_REVISION_NOT_FOUND", "INVALID_PAYLOAD", "TEMPORARY_STORAGE_ERROR", "MAX_ATTEMPTS_REACHED"] },
+          "error_code": { "type": "string", "enum": [         "PLAYER_OFFLINE",
+         "INVENTORY_FULL",
+         "HANDLER_NOT_FOUND", "REFERENCE_NOT_FOUND", "REFERENCE_REVISION_NOT_FOUND", "INVALID_PAYLOAD", "TEMPORARY_STORAGE_ERROR", "MAX_ATTEMPTS_REACHED"] },
           "retryable": { "type": "boolean" }
         }, "required": ["status"] } } } },
         "responses": {

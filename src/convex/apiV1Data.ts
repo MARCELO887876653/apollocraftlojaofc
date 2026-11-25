@@ -433,6 +433,13 @@ export async function claimForAddon(
         mode: c.deliveryMode ?? "SERVER",
         reference_id: c.referenceId ?? null,
         reference_revision: c.referenceRevision ?? null,
+        // parte física (shulker) do kit — o addon entrega SÓ esta parte e
+        // confirma este comando individualmente.
+        unit_index: c.unitIndex ?? null,
+        part_index: c.partIndex ?? null,
+        part_total: c.partTotal ?? null,
+        part_id: c.partId ?? null,
+        part_label: c.partLabel ?? null,
         command: c.command ?? null,
         payload: c.payload ?? {},
         offline_execute: c.offlineExecute,

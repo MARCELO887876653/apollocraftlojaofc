@@ -4,7 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   KeyRound, ShieldCheck, ListChecks, Send, Clock, HeartPulse, AlertTriangle, ArrowLeft, Zap,
+  Download, Boxes, ShieldAlert, History, Wrench,
 } from "lucide-react";
+import docsMarkdown from "@/content/apollo-api-v1.md?raw";
 
 // ─────────────────────────────────────────────────────────────
 // Documentação pública da API de entregas automáticas (v1)
@@ -61,6 +63,10 @@ const NAV = [
   { id: "claim", label: "Claim seguro" },
   { id: "jogador", label: "Fila por jogador / agendamentos" },
   { id: "confirmar", label: "Confirmar entrega" },
+  { id: "kits", label: "Kits e shulkers (parts)" },
+  { id: "duplicadas", label: "Duplicidade e falhas" },
+  { id: "compat", label: "Pedidos antigos / recuperação" },
+  { id: "addon218", label: "Addon v2.1.8 → 2.2.0" },
   { id: "heartbeat", label: "Heartbeat" },
   { id: "erros", label: "Status e códigos de erro" },
   { id: "limites", label: "Rate limit e payloads" },
@@ -68,9 +74,22 @@ const NAV = [
   { id: "bedrock", label: "Bedrock Dedicated Server" },
   { id: "localref", label: "LOCAL_REFERENCE (kits/itens)" },
   { id: "upsert", label: "Upsert, revisão e sync" },
-  { id: "openapi", label: "OpenAPI" },
+  { id: "openapi", label: "OpenAPI e Markdown" },
   { id: "loja", label: "Gerenciar a loja" },
 ];
+
+/** Baixa a documentação completa em Markdown (mesmo conteúdo desta página). */
+function downloadDocs() {
+  const blob = new Blob([docsMarkdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "apollo-api-v1.md";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 export default function ApiDocs() {
   return (
@@ -84,11 +103,16 @@ export default function ApiDocs() {
             <p className="text-sm font-extrabold leading-tight">API de Entregas · Apollo Craft</p>
             <p className="text-[11px] text-muted-foreground">v1 · fila de comandos para addons</p>
           </div>
-          <Button asChild variant="outline" size="sm" className="ml-auto">
-            <Link to="/">
-              <ArrowLeft className="mr-2 size-3.5" /> Voltar à loja
-            </Link>
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={downloadDocs}>
+              <Download className="mr-2 size-3.5" /> Baixar .md
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link to="/">
+                <ArrowLeft className="mr-2 size-3.5" /> Voltar à loja
+              </Link>
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -110,21 +134,26 @@ export default function ApiDocs() {
             <Badge className="bg-sky-500/15 text-sky-400 hover:bg-sky-500/15">API v1</Badge>
             <h1 className="mt-3 text-3xl font-black tracking-tight">Entrega automática para addons</h1>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              Quando um pagamento é aprovado, o site cria automaticamente uma entrega na fila. Seu addon
-              consulta a fila, executa a ação no servidor e confirma o resultado. A API roda nas
-              HTTP actions do Convex que servem esta loja — um endereço próprio, sem depender de proxy
-              no front-end.
+              Quando um pagamento é aprovado, o site enfileira as entregas por <strong>unidade × ação ×
+              shulker</strong>. Seu addon reserva (claim), entrega somente a parte indicada e confirma cada
+              shulker individualmente. A API roda nas HTTP actions do Convex que servem esta loja — um
+              endereço próprio, sem depender de proxy no front-end. O documento completo também está
+              disponível em <strong>Baixar .md</strong>.
             </p>
           </div>
 
           <Section id="visao" icon={ListChecks} title="Visão geral do fluxo">
             <ol className="list-decimal space-y-1 pl-5">
               <li>Cliente compra → pagamento aprovado (confirmado no backend).</li>
-              <li>O site cria a(s) entrega(s) com <code className="rounded bg-muted px-1">idempotency_key</code> única por ação.</li>
-              <li>O addon reserva (claim) as entregas disponíveis.</li>
-              <li>O addon executa a <code className="rounded bg-muted px-1">action</code> no Minecraft.</li>
-              <li>O addon confirma com <code className="rounded bg-muted px-1">PATCH /api/v1/app/command/&#123;id&#125;</code> + <code className="rounded bg-muted px-1">claim_token</code>.</li>
-              <li>A entrega vira <strong>DONE</strong> e nunca mais aparece na fila.</li>
+              <li>O site enfileira <strong>um comando por unidade × ação × shulker</strong>, com
+                <code className="mx-1 rounded bg-muted px-1">idempotency_key</code> única por parte.</li>
+              <li>O addon reserva (claim) as entregas disponíveis; cada comando fica
+                <code className="mx-1 rounded bg-muted px-1">PROCESSING</code> por 5 min.</li>
+              <li>O addon executa <strong>somente a shulker indicada</strong> por
+                <code className="mx-1 rounded bg-muted px-1">part_index</code>/<code className="mx-1 rounded bg-muted px-1">payload.kit_part</code>.</li>
+              <li>O addon confirma aquele comando com <code className="rounded bg-muted px-1">PATCH /api/v1/app/command/&#123;id&#125;</code> + <code className="rounded bg-muted px-1">claim_token</code>.</li>
+              <li>Quando todas as partes de todas as unidades estão <strong>DONE</strong>, o pedido vira
+                <strong>delivered</strong> e os comandos nunca voltam à fila.</li>
             </ol>
           </Section>
 
@@ -232,36 +261,69 @@ X-Api-Key: sk_live_SUA_CHAVE_AQUI`}</Code>
             <p>
               Retorna apenas entregas <strong>PENDING</strong>, com <code className="rounded bg-muted px-1">execute_at</code> no passado
               e pertencentes ao servidor da chave (ou <code className="rounded bg-muted px-1">GLOBAL</code>).
-              Nenhum dado pessoal (CPF, endereço, pagamento) é enviado.
+              Nenhum dado pessoal (CPF, endereço, pagamento) é enviado. Com{" "}
+              <code className="rounded bg-muted px-1">parts</code>, a fila devolve
+              <strong>uma linha por shulker</strong>, já com{" "}
+              <code className="rounded bg-muted px-1">unit_index</code> e os campos de parte.
             </p>
-            <p>Filtros opcionais: <code className="rounded bg-muted px-1">?addon_id=economy</code> e <code className="rounded bg-muted px-1">?limit=50</code>.</p>
-            <Code title="Exemplo de resposta">{`[
+            <p>Filtros opcionais: <code className="rounded bg-muted px-1">?addon_id=apollo-store</code> e <code className="rounded bg-muted px-1">?limit=50</code> (até 200).</p>
+            <Code title="Exemplo de resposta (2ª shulker de um kit)">{`[
   {
     "id": "del_m3f8a1b2c9d4",
     "server_id": "survival-01",
-    "addon_id": "economy",
-    "action": "ADD_MONEY",
-    "action_id": "money-bonus",
-    "step_index": 0,
-    "mode": "SERVER",
-    "reference_id": null,
+    "addon_id": "apollo-store",
+    "action": "GIVE_KIT",
+    "action_id": "give-kit",
+    "step_index": 1,
+    "delivery_group_id": "grp_7c1e...",
+    "mode": "LOCAL_REFERENCE",
+    "reference_id": "kit:kit_god",
+    "reference_revision": 1,
+    "unit_index": 0,
+    "part_index": 1,
+    "part_total": 3,
+    "part_id": "armas",
+    "part_label": "Armas 2/3",
     "command": null,
-    "payload": { "amount": 10000 },
-    "offline_execute": true,
-    "execute_at": "2026-10-03T20:00:00.000Z",
+    "payload": {
+      "kit_part": {
+        "index": 1,
+        "total": 3,
+        "id": "armas",
+        "label": "Armas 2/3",
+        "contents": [{ "type_id": "minecraft:netherite_sword", "name": "Espada", "amount": 1 }]
+      }
+    },
+    "offline_execute": false,
+    "execute_at": "2026-11-25T18:00:00.000Z",
     "status": "PENDING",
     "attempts": 0,
+    "max_attempts": 5,
+    "error_code": null,
+    "retryable": null,
+    "next_attempt_at": null,
+    "requires_manual_intervention": false,
+    "resent": null,
+    "console_log": "[apollocraft] pedido #GXFZV8NH | GIVE_KIT KIT GOD -> AdrianoMaester | survival-01/apollo-store | shulker 2/3 (Armas) | entrega del_m3f8a1b2c9d4 | tentativa 0/5",
     "order": {
-      "id": "#ORD-93241",
-      "client_identifier": "Steve123",
+      "id": "#GXFZV8NH",
+      "client_identifier": "AdrianoMaester",
       "variables": [
-        { "name": "nickname", "value": "Steve123" },
-        { "name": "quantidade", "value": "1" },
-        { "name": "pedido", "value": "#ORD-93241" }
+        { "name": "nickname", "value": "AdrianoMaester" },
+        { "name": "quantidade", "value": "2" },
+        { "name": "parte", "value": "2/3" },
+        { "name": "parte_id", "value": "armas" },
+        { "name": "parte_nome", "value": "Armas 2/3" },
+        { "name": "pedido", "value": "#GXFZV8NH" }
       ]
     }
   }
 ]`}</Code>
+            <p>
+              Sem <code className="rounded bg-muted px-1">parts</code>, os campos de parte vêm{" "}
+              <code className="mx-1 rounded bg-muted px-1">null</code> e a semântica é a antiga (uma
+              entrega por unidade).
+            </p>
           </Section>
 
           <Section id="claim" icon={ShieldCheck} title="Claim seguro: POST /queued_commands/claim">
@@ -274,24 +336,59 @@ X-Api-Key: sk_live_SUA_CHAVE_AQUI`}</Code>
 Authorization: Bearer sk_live_...
 Content-Type: application/json
 
-{ "limit": 20, "addon_id": "economy" }`}</Code>
-            <Code title="Resposta (trecho)">{`{
+{ "limit": 20, "addon_id": "apollo-store" }`}</Code>
+            <Code title="Resposta completa (shulker 2/3 do KIT GOD)">{`{
   "count": 1,
   "data": [
     {
       "id": "del_m3f8a1b2c9d4",
-      "action": "ADD_MONEY",
+      "server_id": "survival-01",
+      "addon_id": "apollo-store",
+      "action": "GIVE_KIT",
+      "action_id": "give-kit",
+      "step_index": 1,
+      "delivery_group_id": "grp_7c1e...",
+      "mode": "LOCAL_REFERENCE",
+      "reference_id": "kit:kit_god",
+      "reference_revision": 1,
+      "unit_index": 0,
+      "part_index": 1,
+      "part_total": 3,
+      "part_id": "armas",
+      "part_label": "Armas 2/3",
+      "payload": {
+        "kit_part": { "index": 1, "total": 3, "id": "armas", "label": "Armas 2/3", "contents": [] }
+      },
       "status": "PROCESSING",
+      "attempts": 1,
+      "max_attempts": 5,
       "claim_token": "clm_9f2c...",
-      "claimed_at": "2026-10-03T20:00:05.000Z",
-      "claim_expires_at": "2026-10-03T20:05:05.000Z",
-      "resent": { "count": 1, "by": "Equipe", "at": "2026-10-03T19:58:00.000Z" },
-      "console_log": "[apollocraft] pedido #ORD-93241 | ADD_MONEY Moedas -> Steve123 | survival-01/economy | entrega del_m3f8a1b2c9d4 | tentativa 2/5 | REENVIADA 1x pelo painel (Equipe)",
-      "payload": { "amount": 10000 },
-      "order": { "id": "#ORD-93241", "client_identifier": "Steve123", "variables": [] }
+      "claimed_at": "2026-11-25T18:00:05.000Z",
+      "claimed_by": "api_key_id",
+      "claim_expires_at": "2026-11-25T18:05:05.000Z",
+      "resent": null,
+      "console_log": "[apollocraft] pedido #GXFZV8NH | GIVE_KIT KIT GOD -> AdrianoMaester | survival-01/apollo-store | shulker 2/3 (Armas) | entrega del_m3f8a1b2c9d4 | tentativa 1/5",
+      "order": {
+        "id": "#GXFZV8NH",
+        "client_identifier": "AdrianoMaester",
+        "variables": [
+          { "name": "nickname", "value": "AdrianoMaester" },
+          { "name": "quantidade", "value": "2" },
+          { "name": "parte", "value": "2/3" },
+          { "name": "parte_id", "value": "armas" },
+          { "name": "parte_nome", "value": "Armas 2/3" },
+          { "name": "pedido", "value": "#GXFZV8NH" }
+        ]
+      }
     }
   ]
 }`}</Code>
+            <p>
+              <strong>Entregue apenas esta parte.</strong> Um comando com
+              <code className="mx-1 rounded bg-muted px-1">part_total &gt; 1</code> representa UMA shulker,
+              não o kit inteiro. A próxima shulker vem em outro comando/claim, com outro
+              <code className="mx-1 rounded bg-muted px-1">claim_token</code>.
+            </p>
             <p>
               <strong>O claim é atômico.</strong> Uma entrega PENDING passa para PROCESSING uma única vez,
               mesmo com dois workers chamando ao mesmo tempo (transação do banco). Guarde o
@@ -338,23 +435,322 @@ Authorization: Bearer sk_live_...
 Content-Type: application/json
 
 { "status": "DONE", "claim_token": "clm_9f2c...", "response": "10000 moedas adicionadas" }`}</Code>
-            <Code title="Falha temporária (FAILED + retry agendado com backoff)">{`{
+            <Code title="Falha temporária (FAILED + retry com backoff)">{`{
   "status": "FAILED",
   "error_code": "TEMPORARY_STORAGE_ERROR",
   "retryable": true,
-  "response": "Não foi possível acessar o banco de economia"
-}`}</Code>
+  "response": "Chunk não carregou"
+}
+// backoff: 60s → 5min → 15min → 1h → 2h (máx. 5 tentativas)`}</Code>
             <Code title="Falha definitiva (não repete; exige ação manual)">{`{
   "status": "FAILED",
   "error_code": "REFERENCE_NOT_FOUND",
   "retryable": false,
   "response": "O kit vip_diamante não existe mais neste addon"
 }`}</Code>
-            <Code title="Jogador offline (não consome max_attempts)">{`{ "status": "PENDING", "error_code": "PLAYER_OFFLINE" }`}</Code>
-            <Code title="Cancelamento">{`{ "status": "CANCELED", "reason": "Pedido reembolsado" }`}</Code>
+            <Code title="Jogador offline (não consome tentativa · volta em 2 min)">{`{ "status": "PENDING", "claim_token": "clm_9f2c...", "error_code": "PLAYER_OFFLINE" }`}</Code>
+            <Code title="Inventário cheio (não consome tentativa · volta em 60s)">{`{ "status": "PENDING", "claim_token": "clm_9f2c...", "error_code": "INVENTORY_FULL" }`}</Code>
+            <Code title="Cancelamento">{`{ "status": "CANCELED", "claim_token": "clm_9f2c...", "reason": "Pedido reembolsado" }`}</Code>
             <p>
               Depois de <strong>DONE</strong> a entrega não volta a aparecer em <code className="rounded bg-muted px-1">queued_commands</code>.
-              Cada ação da receita é um step independente: se a 3ª ação falhar, as anteriores NÃO são executadas de novo.
+              Cada <strong>shulker</strong> tem seu próprio comando e token: se a 3ª
+              shulker falhar, as anteriores NÃO são executadas de novo. Confirmar <strong>DONE</strong> duas
+              vezes é idempotente — não duplica a entrega.
+            </p>
+            <p>
+              <strong>Regra do pedido:</strong> ele só é marcado como <code className="rounded bg-muted px-1">delivered</code>{" "}
+              quando todos os comandos de todas as unidades × shulkers estiverem <strong>DONE</strong>.
+              Enquanto uma parte estiver pendente, o pedido continua <code className="rounded bg-muted px-1">pending</code>.
+            </p>
+          </Section>
+
+          <Section id="kits" icon={Boxes} title="Kits com várias shulkers (parts)">
+            <p>
+              Um kit fisicamente distribuído em shulkers declara <code className="rounded bg-muted px-1">parts</code>{" "}
+              — uma entrada por shulker. O site cria <strong>um comando por unidade × shulker</strong> e
+              cada comando carrega os campos abaixo. <code className="rounded bg-muted px-1">parts</code> é
+              opcional: sem ele a ação continua sendo uma entrega única.
+            </p>
+            <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+              <span className="rounded border px-2 py-1"><code>part_index</code> · índice da shulker (0 = primeira)</span>
+              <span className="rounded border px-2 py-1"><code>part_total</code> · total de shulkers da ação</span>
+              <span className="rounded border px-2 py-1"><code>part_id</code> · id estável da parte</span>
+              <span className="rounded border px-2 py-1"><code>part_label</code> · nome exibido</span>
+              <span className="rounded border px-2 py-1"><code>unit_index</code> · unidade comprada (0 = primeira)</span>
+              <span className="rounded bg-muted/40 px-2 py-1"><code>step_index</code> · com várias partes, é o índice da shulker</span>
+              <span className="rounded border px-2 py-1"><code>payload.kit_part.index/total/id/label</code></span>
+              <span className="rounded border px-2 py-1"><code>payload.kit_part.contents</code> · prévia da parte</span>
+            </div>
+            <p>
+              <code className="rounded bg-muted px-1">payload.kit_part</code> repete os campos de propósito:
+              addons que só leem o payload não precisam mudar o parser. O addon deve entregar{" "}
+              <strong>somente a shulker de <code className="rounded bg-muted px-1">part_index</code></strong> — nunca o kit inteiro quando{" "}
+              <code className="mx-1 rounded bg-muted px-1">part_total &gt; 1</code>.
+            </p>
+            <p className="font-semibold text-foreground">Exemplo completo — KIT GOD (3 shulkers)</p>
+            <Code title="POST /api/v1/products/upsert">{`{
+  "external_id": "apollo:kit:kit_god",
+  "name": "KIT GOD",
+  "price": 24.99,
+  "category_id": "apollo:kits",
+  "server_id": "survival-01",
+  "addon_id": "apollo-store",
+  "delivery_recipe": {
+    "version": 1,
+    "offline_execute": false,
+    "actions": [
+      {
+        "id": "give-kit",
+        "type": "GIVE_KIT",
+        "mode": "LOCAL_REFERENCE",
+        "reference_id": "kit:kit_god",
+        "reference_revision": 1,
+        "server_id": "survival-01",
+        "addon_id": "apollo-store",
+        "offline_execute": false,
+        "parts": [
+          { "id": "armaduras", "label": "Armaduras 1/3" },
+          { "id": "armas", "label": "Armas 2/3" },
+          { "id": "blocos", "label": "Blocos 3/3" }
+        ]
+      }
+    ]
+  }
+}`}</Code>
+            <p className="font-semibold text-foreground">Exemplo completo — KIT GUERREIRO (3 shulkers)</p>
+            <Code title="POST /api/v1/products/upsert">{`{
+  "external_id": "apollo:kit:kit_guerreiro",
+  "name": "KIT GUERREIRO",
+  "price": 24.99,
+  "category_id": "apollo:kits",
+  "server_id": "survival-01",
+  "addon_id": "apollo-store",
+  "delivery_recipe": {
+    "version": 1,
+    "offline_execute": false,
+    "actions": [
+      {
+        "id": "give-kit",
+        "type": "GIVE_KIT",
+        "mode": "LOCAL_REFERENCE",
+        "reference_id": "kit:kit_guerreiro",
+        "reference_revision": 1,
+        "server_id": "survival-01",
+        "addon_id": "apollo-store",
+        "offline_execute": false,
+        "parts": [
+          { "id": "armaduras", "label": "Armaduras 1/3" },
+          { "id": "armas", "label": "Armas 2/3" },
+          { "id": "blocos", "label": "Blocos 3/3" }
+        ]
+      }
+    ]
+  }
+}`}</Code>
+            <p>
+              <strong>Múltiplas unidades:</strong> 2× KIT GUERREIRO gera 6 comandos — chaves{" "}
+              <code className="rounded bg-muted px-1">&lt;orderId&gt;:0:0</code>,{" "}
+              <code className="rounded bg-muted px-1">…:p2</code>,{" "}
+              <code className="rounded bg-muted px-1">…:p3</code>,{" "}
+              <code className="rounded bg-muted px-1">…:u2</code>,{" "}
+              <code className="rounded bg-muted px-1">…:u2:p2</code>,{" "}
+              <code className="rounded bg-muted px-1">…:u2:p3</code>. O pedido só fecha quando as 6
+              shulkers estiverem <strong>DONE</strong>.
+            </p>
+            <p>
+              <strong>Quantidade:</strong> com <code className="rounded bg-muted px-1">parts</code>,{" "}
+              <code className="mx-1 rounded bg-muted px-1">MULTIPLY</code> gera 1 comando por shulker (payload já
+              multiplicado); <code className="mx-1 rounded bg-muted px-1">REPEAT</code> e o padrão geram 1 por
+              unidade × shulker; <code className="mx-1 rounded bg-muted px-1">IGNORE</code> gera 1 por shulker,
+              sem multiplicar pela quantidade.
+            </p>
+            <p className="font-semibold text-foreground">Ler e atualizar a receita do produto</p>
+            <Code title="GET /api/v1/products/{id}/delivery-recipe">{`{
+  "product_id": "j57abc123",
+  "delivery_recipe": {
+    "version": 1,
+    "offline_execute": false,
+    "actions": [
+      {
+        "id": "give-kit",
+        "type": "GIVE_KIT",
+        "mode": "LOCAL_REFERENCE",
+        "reference_id": "kit:kit_god",
+        "reference_revision": 1,
+        "parts": [
+          { "id": "armaduras", "label": "Armaduras 1/3" },
+          { "id": "armas", "label": "Armas 2/3" },
+          { "id": "blocos", "label": "Blocos 3/3" }
+        ]
+      }
+    ]
+  }
+}`}</Code>
+            <Code title="PUT /api/v1/products/{id}/delivery-recipe">{`{
+  "delivery_recipe": {
+    "version": 1,
+    "expected_revision": 2,
+    "actions": [
+      {
+        "id": "give-kit",
+        "type": "GIVE_KIT",
+        "mode": "LOCAL_REFERENCE",
+        "reference_id": "kit:kit_guerreiro",
+        "reference_revision": 1,
+        "parts": [
+          { "id": "armaduras", "label": "Armaduras 1/3" },
+          { "id": "armas", "label": "Armas 2/3" },
+          { "id": "blocos", "label": "Blocos 3/3" }
+        ]
+      }
+    ]
+  }
+}
+→ 200 { "product_id": "...", "revision": 3, "delivery_recipe": { ... } }
+→ 409 { "errors": [{ "code": "SYNC_CONFLICT" }], "current_revision": 4 }`}</Code>
+            <p>
+              O mesmo conteúdo pode ir em <code className="rounded bg-muted px-1">delivery_recipe</code> no
+              <code className="mx-1 rounded bg-muted px-1">POST /products/upsert</code> ou no
+              <code className="mx-1 rounded bg-muted px-1">PATCH /products/&#123;id&#125;</code>. Produtos publicados
+              pelo addon usam <code className="rounded bg-muted px-1">expected_revision</code> para evitar
+              sobrescrita silenciosa.
+            </p>
+          </Section>
+
+          <Section id="duplicadas" icon={ShieldAlert} title="Duplicidade, offline, inventário cheio e rede">
+            <p>
+              O sistema foi desenhado para que uma falha de rede ou um reinício do addon nunca virem duas
+              entregas da mesma shulker:
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li><strong>Idempotência por parte:</strong> unidade × ação × shulker tem chave única; recriar não duplica.</li>
+              <li><strong>Claim atômico:</strong> dois workers não reservam o mesmo comando.</li>
+              <li><strong>Lease de 5 min:</strong> se o addon cair, o comando volta para PENDING após expirar.</li>
+              <li><strong>DONE é final:</strong> não retorna à fila; confirmação repetida é idempotente.</li>
+              <li><strong>Confirmação por shulker:</strong> confirmar a parte 2 não conclui as partes 3+ nem outras unidades.</li>
+              <li><strong>Reenvio só pelo painel:</strong> cria nova tentativa, com autor, data e auditoria.</li>
+            </ul>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[620px] border-collapse text-xs">
+                <thead>
+                  <tr className="border-b text-left text-foreground">
+                    <th className="py-1.5 pr-3">Situação</th>
+                    <th className="py-1.5 pr-3">Addon envia</th>
+                    <th className="py-1.5">Site faz</th>
+                  </tr>
+                </thead>
+                <tbody className="[&_td]:border-b [&_td]:py-1.5 [&_td]:pr-3">
+                  <tr><td>Jogador offline e <code>offline_execute=false</code></td><td><code>PENDING</code> + <code>PLAYER_OFFLINE</code></td><td>volta em 2 min, sem consumir tentativa</td></tr>
+                  <tr><td>Inventário cheio</td><td><code>PENDING</code> + <code>INVENTORY_FULL</code></td><td>volta em 60 s, sem consumir tentativa</td></tr>
+                  <tr><td>Timeout ao confirmar</td><td>repete o PATCH com o mesmo <code>claim_token</code></td><td><code>DONE</code> repetido é idempotente</td></tr>
+                  <tr><td>Timeout no claim</td><td>repete o claim</td><td>lease impede entrega simultânea</td></tr>
+                  <tr><td>Addon reiniciou no meio</td><td>reclama após o lease</td><td>comando volta a <code>PENDING</code></td></tr>
+                  <tr><td>Chunk/mundo indisponível</td><td><code>FAILED</code> + <code>TEMPORARY_STORAGE_ERROR</code> + <code>retryable:true</code></td><td>backoff 60s → 5min → 15min → 1h → 2h</td></tr>
+                  <tr><td>Kit/revisão inexistente</td><td><code>FAILED</code> + código próprio + <code>retryable:false</code></td><td>falha definitiva, sinalizada no painel</td></tr>
+                  <tr><td>Rate limit</td><td>respeita <code>Retry-After</code></td><td>headers <code>X-RateLimit-*</code></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              <strong>Nunca confirme DONE antes de executar o give/spawn.</strong> Para inventário cheio não use{" "}
+              <code className="rounded bg-muted px-1">FAILED</code>: isso encerraria a entrega como falha definitiva.
+              Use <code className="rounded bg-muted px-1">PENDING</code> + <code className="rounded bg-muted px-1">INVENTORY_FULL</code>.
+            </p>
+          </Section>
+
+          <Section id="compat" icon={History} title="Pedidos antigos, auditoria e recuperação">
+            <p>
+              <strong>Compatibilidade:</strong> receitas antigas (sem <code className="rounded bg-muted px-1">parts</code>)
+              continuam válidas e geram 1 comando por unidade. Compras antigas usam o snapshot da receita da
+              época; alterar o produto agora não muda pedidos já pagos. Pedidos de item único (sem{" "}
+              <code className="mx-1 rounded bg-muted px-1">GIVE_KIT</code>) fecham normalmente quando todos os
+              comandos ficam <code className="mx-1 rounded bg-muted px-1">DONE</code>.
+            </p>
+            <p>
+              <strong>Kits antigos sem composição:</strong> o site não sabe quantas shulkers faltam, então NÃO
+              fecha o pedido automaticamente. Esses pedidos aparecem em{" "}
+              <strong>Entregas automáticas → Auditoria de entregas</strong> com o selo{" "}
+              <em>kit sem composição de shulkers</em>. Na auditoria de novembro/2026 eram <strong>34 pedidos</strong>,
+              incluindo <code className="rounded bg-muted px-1">#GXFZV8NH</code> (2× KIT GUERREIRO) e{" "}
+              <code className="rounded bg-muted px-1">#97NP4ZFD</code> (1× KIT GOD).
+            </p>
+            <p className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-red-200/90">
+              <strong>Não reenvie esses pedidos agora.</strong> Com o addon 2.1.8, reenviar pode entregar de
+              novo o conteúdo que o jogador já recebeu e continuar sem as shulkers restantes. A recuperação só
+              é segura depois que o addon entrega por <code className="rounded bg-muted px-1">part_index</code>{" "}
+              e é validado em teste.
+            </p>
+            <p className="font-semibold text-foreground">Procedimento seguro</p>
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>Atualize o addon (seção seguinte) e valide em ambiente de teste.</li>
+              <li>Publique KIT GOD e KIT GUERREIRO com 3 <code className="rounded bg-muted px-1">parts</code> cada (seção Kits).</li>
+              <li>Faça um pedido de teste: 2× kit de 3 shulkers → 6 comandos, 6 confirmações, pedido só fecha na última.</li>
+              <li>No painel, abra cada pedido pendente e use <strong>“Entregar shulkers faltantes”</strong>.</li>
+              <li>A operação cria somente as partes ausentes, com a mesma chave idempotente; nunca recria parte <code className="rounded bg-muted px-1">DONE</code>.</li>
+              <li>Confira a entrega em jogo; o pedido fecha automaticamente ao confirmar todas as partes.</li>
+            </ol>
+            <p>
+              Para <code className="rounded bg-muted px-1">#GXFZV8NH</code> serão 4 comandos (partes 2 e 3 de
+              cada uma das 2 unidades) e para <code className="rounded bg-muted px-1">#97NP4ZFD</code> serão 2
+              comandos (partes 2 e 3) — total <strong>6 comandos</strong>, sem tocar nas shulkers já recebidas.
+              Se a entrega for feita em jogo pela equipe, use a <strong>entrega manual</strong> com observação;
+              não reenvie a fila.
+            </p>
+          </Section>
+
+          <Section id="addon218" icon={Wrench} title="Alterações necessárias no addon v2.1.8">
+            <p>
+              O addon atual entrega uma shulker por comando. Para compatibilidade total com a API atualizada,
+              aplique os itens abaixo e suba a versão para <strong>2.2.0</strong>:
+            </p>
+            <ol className="list-decimal space-y-1 pl-5">
+              <li><strong>Publicar a composição:</strong> envie <code className="rounded bg-muted px-1">parts</code> no
+                <code className="mx-1 rounded bg-muted px-1">POST/PATCH /products</code> (GOD e GUERREIRO: 3 partes).</li>
+              <li><strong>Ler os campos do claim:</strong> <code className="rounded bg-muted px-1">unit_index</code>,
+                <code className="mx-1 rounded bg-muted px-1">part_index</code>,
+                <code className="mx-1 rounded bg-muted px-1">part_total</code>,
+                <code className="mx-1 rounded bg-muted px-1">part_id</code>,
+                <code className="mx-1 rounded bg-muted px-1">part_label</code> e
+                <code className="mx-1 rounded bg-muted px-1">payload.kit_part</code>.</li>
+              <li><strong>Entregar só a parte:</strong> selecione a shulker por <code className="rounded bg-muted px-1">part_index</code>;
+                nunca dê o kit inteiro em um comando com <code className="rounded bg-muted px-1">part_total &gt; 1</code>.</li>
+              <li><strong>Confirmar cada comando:</strong> use o <code className="rounded bg-muted px-1">claim_token</code> daquele
+                comando; não reuse token de outra shulker.</li>
+              <li><strong>Inventário cheio:</strong> devolva <code className="rounded bg-muted px-1">PENDING</code> +
+                <code className="mx-1 rounded bg-muted px-1">INVENTORY_FULL</code>.</li>
+              <li><strong>Offline:</strong> devolva <code className="rounded bg-muted px-1">PENDING</code> +
+                <code className="mx-1 rounded bg-muted px-1">PLAYER_OFFLINE</code> quando
+                <code className="mx-1 rounded bg-muted px-1">offline_execute=false</code>.</li>
+              <li><strong>Falha de rede:</strong> repita a requisição com o mesmo token; não marque FAILED por timeout local.</li>
+              <li><strong>Idempotência local:</strong> persista IDs executados em Dynamic Properties.</li>
+              <li><strong>Heartbeat:</strong> anuncie <code className="rounded bg-muted px-1">capabilities: &#123; "local_reference": true, "claim": true, "kit_parts": true &#125;</code>
+                e <code className="rounded bg-muted px-1">addon_version: "2.2.0"</code>.</li>
+            </ol>
+            <Code title="Handler com partes (server-net)">{`async function giveKitPart(d, kit) {
+  const total = d.part_total ?? 1;
+  const index = d.part_index ?? 0;
+  // Cada parte é UMA shulker local. Sem parts (total 1), entrega o kit inteiro.
+  const shulkers = total > 1 ? [kit.shulkers[index]] : kit.shulkers;
+  for (const shulker of shulkers) {
+    const ok = giveShulker(d.order.client_identifier, shulker);
+    if (!ok) throw new InventoryFullError("INVENTORY_FULL");
+  }
+}
+
+// no loop do tick:
+try {
+  await handler(d);
+  await done(d.id, d.claim_token, "Shulker " + ((d.part_index ?? 0) + 1) + "/" + (d.part_total ?? 1) + " entregue");
+} catch (e) {
+  if (e.code === "INVENTORY_FULL") await pending(d.id, d.claim_token, "INVENTORY_FULL");
+  else if (e.code === "PLAYER_OFFLINE") await pending(d.id, d.claim_token, "PLAYER_OFFLINE");
+  else await failed(d.id, d.claim_token, "TEMPORARY_STORAGE_ERROR", true, String(e));
+}`}</Code>
+            <p>
+              <strong>Teste obrigatório antes de recuperar pedidos reais:</strong> 2× kit de 3 shulkers → 6
+              comandos; confirmar 5 → pedido <code className="rounded bg-muted px-1">pending</code>; confirmar a 6ª
+              → <code className="rounded bg-muted px-1">delivered</code>; repetir a confirmação → idempotente;
+              inventário cheio → volta em 60s sem consumir tentativa.
             </p>
           </Section>
 
@@ -364,11 +760,17 @@ Authorization: Bearer sk_live_...
 
 {
   "server_id": "survival-01",
-  "addon_version": "1.4.0",
+  "addon_version": "2.2.0",
   "minecraft_version": "1.21.0",
   "api_client_version": "1.0.0",
-  "capabilities": { "local_reference": true, "claim": true }
+  "capabilities": { "local_reference": true, "claim": true, "kit_parts": true }
 }`}</Code>
+            <p>
+              <code className="rounded bg-muted px-1">kit_parts: true</code> indica que o addon respeita{" "}
+              <code className="mx-1 rounded bg-muted px-1">part_index</code> e confirma cada shulker
+              individualmente. Versões antigas continuam aparecendo no painel, mas não devem receber
+              pedidos com <code className="rounded bg-muted px-1">parts</code> até serem atualizadas.
+            </p>
             <p>
               O painel mostra o servidor como 🟢 Online enquanto o heartbeat chega, além da versão do
               addon, versão do Minecraft e o último erro de integração reportado.
@@ -386,7 +788,8 @@ Authorization: Bearer sk_live_...
   ]
 }`}</Code>
             <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
-              <span className="rounded border px-2 py-1"><code>PLAYER_OFFLINE</code> · jogador fora (volta à fila)</span>
+              <span className="rounded border px-2 py-1"><code>PLAYER_OFFLINE</code> · jogador fora (volta em 2 min)</span>
+              <span className="rounded border px-2 py-1"><code>INVENTORY_FULL</code> · inventário cheio (volta em 60 s)</span>
               <span className="rounded border px-2 py-1"><code>HANDLER_NOT_FOUND</code> · addon não conhece a ação</span>
               <span className="rounded border px-2 py-1"><code>REFERENCE_NOT_FOUND</code> · kit/item local removido</span>
               <span className="rounded border px-2 py-1"><code>REFERENCE_REVISION_NOT_FOUND</code> · revisão do kit mudou</span>
@@ -406,7 +809,8 @@ Authorization: Bearer sk_live_...
               <li>GET: <strong>120 req/min</strong> · POST/PATCH/DELETE: <strong>30 req/min</strong> (por chave).</li>
               <li>Headers: <code className="rounded bg-muted px-1">X-RateLimit-Limit</code>, <code className="rounded bg-muted px-1">X-RateLimit-Remaining</code>, <code className="rounded bg-muted px-1">Retry-After</code> (no 429).</li>
               <li>O SDK respeita <code className="rounded bg-muted px-1">Retry-After</code>; caso contrário faz backoff exponencial com jitter.</li>
-              <li>Limites de payload: até <strong>25</strong> ações por receita, <strong>64</strong> itens em <code className="rounded bg-muted px-1">contents_preview</code>, ≤ 20&nbsp;000 caracteres por <code className="rounded bg-muted px-1">payload</code>, nome ≤ 120, descrição ≤ 5000, <code className="rounded bg-muted px-1">external_id</code>/<code className="rounded bg-muted px-1">reference_id</code> ≤ 160.</li>
+              <li>Limites de payload: até <strong>25</strong> ações por receita, <strong>12</strong> shulkers por ação (<code className="rounded bg-muted px-1">parts</code>), <strong>64</strong> itens em <code className="rounded bg-muted px-1">contents_preview</code>, ≤ 20&nbsp;000 caracteres por <code className="rounded bg-muted px-1">payload</code>, nome ≤ 120, descrição ≤ 5000, <code className="rounded bg-muted px-1">external_id</code>/<code className="rounded bg-muted px-1">reference_id</code> ≤ 160.</li>
+              <li>Fila: até <strong>200</strong> comandos por chamada (padrão 50) · claim: até <strong>100</strong> (padrão 20) · lease de <strong>5 min</strong>.</li>
             </ul>
             <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
               <span className="rounded border px-2 py-1">400 · requisição inválida</span>
@@ -429,12 +833,19 @@ Authorization: Bearer sk_live_...
   id: string;
   action: string;
   action_id: string | null;
+  step_index: number | null;
   mode: "SERVER" | "LOCAL_REFERENCE";
   reference_id: string | null;
   reference_revision: number | null;
-  command: string | null;
-  payload: any;
+  // Kits com várias shulkers: entregue SOMENTE a parte indicada.
+  unit_index: number | null;
+  part_index: number | null;
+  part_total: number | null;
+  part_id: string | null;
+  part_label: string | null;
+  payload: { kit_part?: { index: number; total: number; id: string; label: string; contents: any[] } } & Record<string, any>;
   offline_execute: boolean;
+  claim_token: string;
   order: { id: string; client_identifier: string; variables: { name: string; value: string }[] };
 };
 
@@ -445,6 +856,12 @@ export function registerHandler(action: string, fn: (d: Delivery) => Promise<voi
 
 registerHandler("ADD_MONEY", async (d) => { addMoney(d.order.client_identifier, d.payload.amount); });
 registerHandler("ADD_RANK", async (d) => { addRank(d.order.client_identifier, d.payload.rank); });
+registerHandler("GIVE_KIT", async (d) => {
+  const kit = loadKit(d.reference_id);
+  const parts = d.part_total ?? 1;
+  const shulkers = parts > 1 ? [kit.shulkers[d.part_index ?? 0]] : kit.shulkers;
+  for (const shulker of shulkers) giveShulker(d.order.client_identifier, shulker);
+});
 // Ação desconhecida → HANDLER_NOT_FOUND (veja o loop abaixo).`}</Code>
             <p>
               Persistência local: guarde os IDs já concluídos em <strong>Dynamic Properties</strong> (pequenos
@@ -682,7 +1099,7 @@ export function start() {
               <li>O addon cria/atualiza a categoria e faz <code className="rounded bg-muted px-1">POST /products/upsert</code> com a receita LOCAL_REFERENCE.</li>
               <li>Publica (<code className="rounded bg-muted px-1">/publish</code>).</li>
               <li>Cliente compra → o site cria o snapshot da receita.</li>
-              <li>O addon faz claim, carrega <code className="rounded bg-muted px-1">kit:vip_diamante</code> local, entrega e confirma DONE.</li>
+              <li>O addon faz claim, carrega <code className="rounded bg-muted px-1">kit:vip_diamante</code> local e entrega <strong>a shulker indicada</strong> por <code className="rounded bg-muted px-1">part_index</code>, confirmando cada comando separadamente.</li>
             </ol>
 
             <p className="font-semibold text-foreground">Fluxo Apollo — ITEM</p>
@@ -713,8 +1130,14 @@ export function start() {
   "category_id": "apollo:kits",
   "delivery_recipe": {
     "version": 1,
-    "actions": [{ "id": "give-kit", "type": "GIVE_KIT", "mode": "LOCAL_REFERENCE",
-      "reference_id": "kit:vip_diamante", "reference_revision": 3 }]
+    "actions": [{
+      "id": "give-kit", "type": "GIVE_KIT", "mode": "LOCAL_REFERENCE",
+      "reference_id": "kit:vip_diamante", "reference_revision": 3,
+      "parts": [
+        { "id": "armaduras", "label": "Armaduras 1/2" },
+        { "id": "armas", "label": "Armas 2/2" }
+      ]
+    }]
   }
 }
 → 201 (criado) ou 200 (atualizado) — sempre o mesmo "id"`}</Code>
@@ -754,15 +1177,22 @@ export function start() {
             </p>
           </Section>
 
-          <Section id="openapi" icon={ListChecks} title="OpenAPI">
+          <Section id="openapi" icon={ListChecks} title="OpenAPI e Markdown">
             <p>
-              A especificação OpenAPI 3.1 gerada a partir da implementação real está em{" "}
+              A especificação OpenAPI 3.1 está em{" "}
               <a href="/openapi-v1.json" className="text-primary underline" target="_blank" rel="noreferrer">
                 /openapi-v1.json
               </a>
               . Ela reflete as rotas, schemas, scopes e respostas desta página — importe no Postman/Insomnia
-              ou gere clientes.
+              ou gere clientes. Inclui <code className="rounded bg-muted px-1">parts</code> e os campos de
+              shulker no comando.
             </p>
+            <p>
+              O documento completo também pode ser baixado em Markdown (mesmo conteúdo desta página):
+            </p>
+            <Button variant="outline" size="sm" onClick={downloadDocs}>
+              <Download className="mr-2 size-3.5" /> Baixar documentação completa (.md)
+            </Button>
           </Section>
 
           <Section id="loja" icon={KeyRound} title="Gerenciando a loja através de addons">
